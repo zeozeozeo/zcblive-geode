@@ -53,4 +53,4 @@
 .cache/
 
 /zcblive-build/*.dll
-/src/embed.hpp
+# /src/embed.hpp
