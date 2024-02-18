@@ -1,5 +1,5 @@
 import os
-PATH = 'zcblive-build/live.dll'
+PATH = 'live/target/release/live.dll'
 
 o = open('src/embed.hpp', 'w', encoding='utf-8')
 o.write('#pragma once\n')
