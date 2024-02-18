@@ -8,3 +8,4 @@ Implementation details:
 - The Geode wrapper calls `GetProcAddress` to get the address of the exported functions to later call them inside Geode hooks.
 - Only works on Windows, for now.
 - **Does not** use FMOD, uses [KittyAudio](https://github.com/zeozeozeo/kittyaudio) instead (based on cpal).
+- i am sorry :sob:
