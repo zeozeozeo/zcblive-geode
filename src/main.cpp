@@ -117,17 +117,17 @@ class $modify(GJBaseGameLayer) {
 
 	void handleButton(bool holding, int button, bool player1) {
 		GJBaseGameLayer::handleButton(holding, button, player1);
-		// log::info("GJBaseGameLayer::handleButton");
+		log::info("GJBaseGameLayer::handleButton");
 		g_mutex.lock();
 		if (zcblive_set_playlayer_time) {
-			double time = *(double*)((char*)PlayLayer::get() + 0x328);
+			PlayLayer* pl = PlayLayer::get();
+			double time = pl ? (*(double*)((char*)pl + 0x328)) : 0.0;
 			zcblive_set_playlayer_time(time);
 		}
 		if (zcblive_on_action) {
 			zcblive_on_action(holding ? PB_PUSH : PB_RELEASE, !player1);
 		}
 		g_mutex.unlock();
-		
 	}
 
 	bool init() {
