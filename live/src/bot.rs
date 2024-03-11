@@ -274,12 +274,37 @@ impl Config {
     }
 }
 
+#[derive(Default)]
+pub struct ClickTimes {
+    jump: [f64; 2],  // 2 players
+    left: [f64; 2],  // 2 players
+    right: [f64; 2], // 2 players
+}
+
+impl ClickTimes {
+    fn set_time(&mut self, button: Button, player2: bool, time: f64) {
+        match button {
+            Button::Jump => self.jump[player2 as usize] = time,
+            Button::Left => self.left[player2 as usize] = time,
+            Button::Right => self.right[player2 as usize] = time,
+        }
+    }
+
+    fn get_prev_time(&self, button: Button, player2: bool) -> f64 {
+        match button {
+            Button::Left => self.left[player2 as usize],
+            Button::Right => self.right[player2 as usize],
+            Button::Jump => self.jump[player2 as usize],
+        }
+    }
+}
+
 pub struct Bot {
     pub conf: Config,
     pub mixer: Mixer,
     #[cfg(not(feature = "geode"))]
     pub playlayer: *mut c_void, // PlayLayer
-    pub prev_time: f64,
+    pub prev_times: ClickTimes,
     pub is_loading_clickpack: bool,
     pub clickpack_num_sounds: usize,
     pub selected_clickpack: String,
@@ -321,7 +346,7 @@ impl Default for Bot {
             mixer: Mixer::new(),
             #[cfg(not(feature = "geode"))]
             playlayer: std::ptr::null_mut(), // PlayLayer::from_address(0)
-            prev_time: 0.0,
+            prev_times: ClickTimes::default(),
             is_loading_clickpack: false,
             clickpack_num_sounds: 0,
             selected_clickpack: String::new(),
@@ -589,8 +614,9 @@ impl Bot {
         }
     }
 
-    pub fn on_init(&mut self) {
-        self.prev_time = 0.0;
+    pub fn on_init(&mut self, playlayer: usize) {
+        self.playlayer = playlayer as *mut c_void;
+        self.prev_times = ClickTimes::default();
         self.prev_click_type = ClickType::None;
         self.prev_pitch = 0.0;
         self.prev_volume = self.conf.volume_settings.global_volume;
@@ -604,12 +630,14 @@ impl Bot {
         //     get_base()
         // );
         //log::info!("push: {push}");
+        if self.playlayer.is_null() {}
         if self.clickpack_num_sounds == 0 || !self.is_in_level() || !self.conf.enabled {
             return;
         }
+        log::info!("pl time: {}", self.time());
         // is_in_level
         #[cfg(not(feature = "geode"))]
-        if *(self.playlayer as *const bool).offset(0x2f17) || BOT.playlayer_time == 0.0 {
+        if *(self.playlayer as *const bool).offset(0x2f17) || self.time() == 0.0 {
             return;
         }
         // let pl_time = unsafe { *((self.playlayer as usize + 0x328) as *const f64)
@@ -625,7 +653,8 @@ impl Bot {
         // }
 
         let now = self.time();
-        let dt = (now - self.prev_time).abs();
+        let prev_time = self.prev_times.get_prev_time(button, player2);
+        let dt = (now - prev_time).abs();
         let click_type = ClickType::from_time(push, dt, &self.conf.timings);
         let use_fmod = self.conf.use_fmod;
 
@@ -707,7 +736,7 @@ impl Bot {
             }
             */
         }
-        self.prev_time = now;
+        self.prev_times.set_time(button, player2, now);
         self.prev_click_type = click_type;
         self.prev_pitch = pitch;
     }
@@ -1408,6 +1437,8 @@ impl Bot {
     fn load_clickpack_thread(err_fn: impl Fn(anyhow::Error), dir: &Path) {
         unsafe {
             BOT.is_loading_clickpack = true;
+            log::info!("load clickpack thread");
+            BOT.clickpack = Clickpack::default();
             let _ = BOT.clickpack.load_from_path(dir).map_err(|e| {
                 log::error!("failed to load clickpack: {e}");
                 err_fn(e);
@@ -1569,11 +1600,11 @@ impl Bot {
         if !self.is_loading_clickpack && self.is_in_level() {
             ui.separator();
             ui.collapsing("Debug", |ui| {
-                let dur = Duration::from_secs_f64(self.prev_time);
-                let ago = self.time() - dur.as_secs_f64();
-                help_text(ui, &format!("{dur:?} since the start of the level"), |ui| {
-                    ui.label(format!("Last action time: {dur:.2?} ({ago:.2}s ago)"));
-                });
+                // let dur = Duration::from_secs_f64(self.prev_time);
+                // let ago = self.time() - dur.as_secs_f64();
+                // help_text(ui, &format!("{dur:?} since the start of the level"), |ui| {
+                //     ui.label(format!("Last action time: {dur:.2?} ({ago:.2}s ago)"));
+                // });
                 ui.label(format!("Last click type: {:?}", self.prev_click_type));
                 ui.label(format!(
                     "Last pitch: {:.4} ({} => {})",

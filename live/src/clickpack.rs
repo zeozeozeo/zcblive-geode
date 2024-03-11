@@ -3,6 +3,7 @@ use kittyaudio::Sound;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy)]
 pub enum Button {
     Jump = 1,
     Left = 2,
@@ -292,9 +293,25 @@ fn read_clicks_in_directory(dir: &Path) -> Vec<SoundWrapper> {
 }
 
 impl PlayerClicks {
+    fn load_from_subdirs(&mut self, path: &Path) {
+        let Ok(dir) = path
+            .read_dir()
+            .map_err(|e| log::warn!("failed to read directory {path:?}: {e}"))
+        else {
+            return;
+        };
+        for entry in dir {
+            let Ok(entry) = entry.map_err(|e| log::warn!("error in directory entry: {e}")) else {
+                continue;
+            };
+            self.load_from_dir(&entry.path())
+        }
+    }
+
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn load_from_dir(&mut self, path: &Path) {
-        let path_str = path.to_str().unwrap();
+        log::debug!("trying to match directory {path:?}");
+        let filename = path.file_name().unwrap().to_string_lossy();
         let patterns = [
             ("hard", "click", &mut self.hardclicks),
             ("hard", "release", &mut self.hardreleases),
@@ -308,9 +325,9 @@ impl PlayerClicks {
         let mut matched_any = false;
         for (pat1, pat2, clicks) in patterns {
             let is_pat = if !pat1.is_empty() {
-                path_str.contains(pat1) && path_str.contains(pat2)
+                filename.contains(pat1) && filename.contains(pat2)
             } else {
-                path_str.contains(pat2)
+                filename.contains(pat2)
             };
             if is_pat {
                 log::debug!("directory {path:?} matched pattern (\"{pat1}\", \"{pat2}\")");
@@ -446,10 +463,13 @@ impl Clickpack {
     }
 
     pub fn load_from_path(&mut self, clickpack_dir: &Path) -> Result<()> {
+        log::info!("loading clickpack from path {clickpack_dir:?}");
         for (i, dir) in CLICKPACK_DIRNAMES.iter().enumerate() {
             let mut path = clickpack_dir.to_path_buf();
             path.push(dir);
-            self[i].load_from_dir(&path);
+            log::info!("loading from dir {path:?}");
+
+            self[i].load_from_subdirs(&path);
 
             // try to load noise from the sound directories
             if !self.noise.is_some() {
@@ -459,7 +479,8 @@ impl Clickpack {
 
         if !self.has_clicks() {
             log::warn!("folders {CLICKPACK_DIRNAMES:?} were not found in the clickpack, assuming there is only one player");
-            self[0].load_from_dir(clickpack_dir);
+
+            self[0].load_from_subdirs(clickpack_dir);
         }
 
         // try to load noise from the root clickpack dir
