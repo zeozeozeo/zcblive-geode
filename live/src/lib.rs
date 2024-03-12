@@ -10,6 +10,8 @@ mod hooks;
 mod utils;
 
 use bot::BOT;
+use clickpack::Button;
+use game::PlayLayer;
 use retour::static_detour;
 use std::{ffi::c_void, sync::Once};
 use windows::Win32::{
@@ -158,42 +160,31 @@ unsafe extern "system" fn zcblive_main(_hmod: *mut c_void) -> u32 {
     1
 }
 
-// functions for other mods to call if they need it for some reason
-// also used for geode
+// DLL externs
 
-//#[no_mangle]
-//unsafe extern "system" fn zcblive_on_action(button: u8, player2: bool) {
-//    if let Some(button) = PlayerButton::from_u8(button) {
-//        BOT.on_action(button, player2)
-//    }
-//}
-//
-//#[no_mangle]
-//#[allow(unused_variables)]
-//unsafe extern "system" fn zcblive_set_playlayer(playlayer: *mut c_void /*PlayLayer*/) {
-//    #[cfg(not(feature = "geode"))]
-//    {
-//        BOT.playlayer = playlayer;
-//    }
-//}
-//
-//#[no_mangle]
-//unsafe extern "system" fn zcblive_set_is_in_level(is_in_level: bool) {
-//    BOT.is_in_level = is_in_level;
-//}
-//
-//#[no_mangle]
-//unsafe extern "system" fn zcblive_set_playlayer_time(playlayer_time: f64) {
-//    BOT.playlayer_time = playlayer_time;
-//}
-//
-//#[no_mangle]
-//unsafe extern "system" fn zcblive_on_playlayer_init() {
-//    BOT.on_init()
-//}
-//
-//#[no_mangle]
-//unsafe extern "system" fn zcblive_on_basegamelayer_reset() {
-//    BOT.on_reset()
-//}
-//
+#[no_mangle]
+unsafe extern "system" fn zcblive_on_action(button: u8, player2: bool, push: bool) {
+    BOT.on_action(Button::from_u8(button), player2, push);
+}
+
+#[no_mangle]
+unsafe extern "system" fn zcblive_set_is_in_level(is_in_level: bool) {
+    BOT.is_in_level = is_in_level;
+}
+
+#[no_mangle]
+unsafe extern "system" fn zcblive_set_playlayer_time(playlayer_time: f64) {
+    BOT.playlayer_time = playlayer_time;
+}
+
+/// can pass NULL to `playlayer`
+#[no_mangle]
+unsafe extern "system" fn zcblive_on_init(playlayer: PlayLayer) {
+    BOT.on_init(playlayer)
+}
+
+/// equivalent to passing NULL to `zcblive_on_init`
+#[no_mangle]
+unsafe extern "system" fn zcblive_on_exit() {
+    BOT.on_exit()
+}
