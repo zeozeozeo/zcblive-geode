@@ -11,7 +11,6 @@ mod utils;
 
 use bot::BOT;
 use clickpack::Button;
-use game::PlayLayer;
 use retour::static_detour;
 use std::{ffi::c_void, sync::Once};
 use windows::Win32::{
@@ -127,9 +126,15 @@ fn hk_wgl_swap_buffers(hdc: HDC) -> i32 {
     }
 }
 
-/// Main function
+/// Main function, first argument is unused
 #[no_mangle]
 unsafe extern "system" fn zcblive_main(_hmod: *mut c_void) -> u32 {
+    zcblive_initialize();
+    1
+}
+
+#[no_mangle]
+unsafe extern "C" fn zcblive_initialize() {
     // wait for enter key on panics
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info: &std::panic::PanicInfo<'_>| {
@@ -149,42 +154,42 @@ unsafe extern "system" fn zcblive_main(_hmod: *mut c_void) -> u32 {
     log::info!("wglSwapBuffers: {:#X}", swap_buffers as usize);
 
     // initialize swapbuffers hook
-    h_wglSwapBuffers
+    if let Ok(detour) = h_wglSwapBuffers
         .initialize(swap_buffers, hk_wgl_swap_buffers)
-        .unwrap()
-        .enable()
-        .unwrap();
+        .map_err(|e| log::error!("failed to initialize wglSwapBuffers: {e}"))
+    {
+        detour.enable().unwrap();
+    }
 
     // init bot
     BOT.init();
-    1
 }
 
 // DLL externs
 
 #[no_mangle]
-unsafe extern "system" fn zcblive_on_action(button: u8, player2: bool, push: bool) {
+unsafe extern "C" fn zcblive_on_action(button: u8, player2: bool, push: bool) {
     BOT.on_action(Button::from_u8(button), player2, push);
 }
 
 #[no_mangle]
-unsafe extern "system" fn zcblive_set_is_in_level(is_in_level: bool) {
+unsafe extern "C" fn zcblive_set_is_in_level(is_in_level: bool) {
     BOT.is_in_level = is_in_level;
 }
 
 #[no_mangle]
-unsafe extern "system" fn zcblive_set_playlayer_time(playlayer_time: f64) {
+unsafe extern "C" fn zcblive_set_playlayer_time(playlayer_time: f64) {
     BOT.playlayer_time = playlayer_time;
 }
 
 /// can pass NULL to `playlayer`
 #[no_mangle]
-unsafe extern "system" fn zcblive_on_init(playlayer: PlayLayer) {
+unsafe extern "C" fn zcblive_on_init(playlayer: usize) {
     BOT.on_init(playlayer)
 }
 
 /// equivalent to passing NULL to `zcblive_on_init`
 #[no_mangle]
-unsafe extern "system" fn zcblive_on_exit() {
+unsafe extern "C" fn zcblive_on_exit() {
     BOT.on_exit()
 }

@@ -1,9 +1,8 @@
 #[cfg(not(feature = "geode"))]
-use crate::hooks;
+use crate::{game::PlayLayer, hooks};
 
 use crate::{
     clickpack::{Button, ClickType, Clickpack, Pitch, Timings, VolumeSettings},
-    game::PlayLayer,
     utils,
 };
 use anyhow::Result;
@@ -182,8 +181,6 @@ pub struct Config {
     #[serde(default = "bool::default")]
     pub cut_sounds: bool,
     #[serde(default = "bool::default")]
-    pub force_2player: bool,
-    #[serde(default = "bool::default")]
     pub cut_by_releases: bool,
     #[serde(default = "float_one")]
     pub click_speedhack: f64,
@@ -224,7 +221,6 @@ impl Default for Config {
             use_fmod: false,
             use_playlayer_time: false,
             cut_sounds: false,
-            force_2player: false,
             cut_by_releases: false,
             click_speedhack: 1.0,
             noise_speedhack: 1.0,
@@ -598,8 +594,13 @@ impl Bot {
         }
     }
 
-    pub fn on_init(&mut self, playlayer: PlayLayer) {
-        self.playlayer = playlayer;
+    #[allow(unused_variables)]
+    pub fn on_init(&mut self, playlayer: usize) {
+        #[cfg(not(feature = "geode"))]
+        {
+            self.playlayer.addr = playlayer;
+        }
+
         self.prev_times = ClickTimes::default();
         self.prev_click_type = ClickType::None;
         self.prev_pitch = 0.0;
@@ -608,7 +609,11 @@ impl Bot {
     }
 
     pub fn on_exit(&mut self) {
-        self.on_init(PlayLayer::NULL);
+        #[cfg(feature = "geode")]
+        {
+            self.is_in_level = false;
+        }
+        self.on_init(0);
     }
 
     pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {
@@ -718,9 +723,12 @@ impl Bot {
 
     #[inline]
     fn time(&self) -> f64 {
-        if cfg!(feature = "geode") {
+        #[cfg(feature = "geode")]
+        {
             self.playlayer_time
-        } else {
+        }
+        #[cfg(not(feature = "geode"))]
+        {
             self.playlayer.time()
         }
     }
@@ -1162,13 +1170,6 @@ impl Bot {
             },
         );
         */
-
-        help_text(
-            ui,
-            "Always play 2-player sounds even in regular levels when the player 2 button is pressed",
-            |ui| ui.checkbox(&mut self.conf.force_2player, "Force 2-player mode"),
-        );
-
         ui.separator();
 
         ui.collapsing("Timings", |ui| {

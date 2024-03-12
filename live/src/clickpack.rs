@@ -20,6 +20,7 @@ impl Button {
         }
     }
 
+    #[allow(dead_code)]
     pub const fn is_platformer(self) -> bool {
         matches!(self, Self::Left | Self::Right)
     }

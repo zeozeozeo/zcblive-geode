@@ -11,9 +11,17 @@ project(zcblive VERSION 1.0.0)
 # Set up the mod binary
 add_library(${PROJECT_NAME} SHARED src/main.cpp)
 
-# force 32-bit on 64-bit clang
-set(CMAKE_C_FLAGS -m32)
-set(CMAKE_CXX_FLAGS -m32)
+# Statically link the Rust library
+add_subdirectory(${CMAKE_SOURCE_DIR}/live)
+add_library(zcblive_rust STATIC IMPORTED)
+
+# this is so bad
+set_target_properties(zcblive_rust PROPERTIES IMPORTED_LOCATION_RELEASE ${CMAKE_CURRENT_SOURCE_DIR}/live/target/release/zcblive.lib)
+target_link_libraries(${PROJECT_NAME} zcblive_rust)
+
+# Force 32-bit on 64-bit clang, link windows libs required by the Rust library (terrible i know)
+set(CMAKE_C_FLAGS "-m32 -lntdll -lsynchronization")
+set(CMAKE_CXX_FLAGS "-m32 -lntdll -lsynchronization")
 
 if (NOT DEFINED ENV{GEODE_SDK})
     message(FATAL_ERROR "Unable to find Geode SDK! Please define GEODE_SDK environment variable to point to Geode")

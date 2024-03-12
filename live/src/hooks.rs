@@ -27,7 +27,7 @@ pub mod play_layer {
 
     pub fn init(this: PlayLayer, _edx: usize, gjgamelevel: usize, a: bool, b: bool) {
         unsafe {
-            BOT.on_init(this);
+            BOT.on_init(this.addr);
             INIT_ORIGINAL.call(this, 0, gjgamelevel, a, b);
         }
     }
