@@ -22,12 +22,20 @@ pub mod play_layer {
 
     retour::static_detour! {
         pub static INIT_ORIGINAL: unsafe extern "fastcall" fn(usize, usize, usize, bool, bool);
+        pub static DESTRUCTOR_ORIGINAL: unsafe extern "fastcall" fn(usize);
     }
 
     pub fn init(this: usize, _edx: usize, gjgamelevel: usize, a: bool, b: bool) {
         unsafe {
             BOT.on_init(this);
             INIT_ORIGINAL.call(this, 0, gjgamelevel, a, b);
+        }
+    }
+
+    pub fn destructor(this: usize) {
+        unsafe {
+            BOT.on_exit();
+            DESTRUCTOR_ORIGINAL.call(this);
         }
     }
 }
@@ -51,11 +59,12 @@ pub mod base_game_layer {
 pub unsafe fn init_hooks() -> Result<()> {
     {
         use play_layer::*;
-        hook!(INIT_ORIGINAL -> init @ *BASE + 0x2DC4A0);
+        hook!(INIT_ORIGINAL -> init @ *BASE + 0x2dc4a0);
+        hook!(DESTRUCTOR_ORIGINAL -> destructor @ *BASE + 0x2dc080);
     }
     {
         use base_game_layer::*;
-        hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x1B69F0);
+        hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x1b69f0);
     }
     Ok(())
 }
@@ -64,6 +73,7 @@ pub unsafe fn disable_hooks() -> Result<()> {
     {
         use play_layer::*;
         INIT_ORIGINAL.disable()?;
+        DESTRUCTOR_ORIGINAL.disable()?;
     }
     {
         use base_game_layer::*;

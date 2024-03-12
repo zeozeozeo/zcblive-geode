@@ -22,7 +22,10 @@ use std::{
     ops::RangeInclusive,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, Mutex, Once},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, Once,
+    },
     time::{Duration, Instant},
 };
 
@@ -188,10 +191,6 @@ pub struct Config {
     // pub sync_speed_with_game: bool,
     #[serde(default = "float_one")]
     pub noise_speedhack: f64,
-    #[serde(default = "bool::default")]
-    pub hook_wait: bool,
-    #[serde(default = "bool::default")]
-    pub use_minhook: bool,
 }
 
 impl Config {
@@ -229,9 +228,6 @@ impl Default for Config {
             cut_by_releases: false,
             click_speedhack: 1.0,
             noise_speedhack: 1.0,
-            // sync_speed_with_game: true,
-            hook_wait: false,
-            use_minhook: true,
         }
     }
 }
@@ -305,9 +301,7 @@ pub struct Bot {
     #[cfg(not(feature = "geode"))]
     pub playlayer: *mut c_void, // PlayLayer
     pub prev_times: ClickTimes,
-    pub is_loading_clickpack: bool,
-    pub clickpack_num_sounds: usize,
-    pub selected_clickpack: String,
+    pub is_loading_clickpack: Arc<AtomicBool>,
     pub last_conf_save: Instant,
     pub prev_conf: Config,
     pub prev_click_type: ClickType,
@@ -328,8 +322,6 @@ pub struct Bot {
     // pub fmod_noise_sound: *mut FMOD_CHANNEL,
     pub show_fmod_buffersize_warn: bool,
     pub startup_buffer_size: u32,
-    pub used_minhook: bool,
-    pub selected_clickpack_path: PathBuf,
     pub is_in_level: bool,
     pub playlayer_time: f64,
     pub clickpack: Clickpack,
@@ -340,16 +332,13 @@ impl Default for Bot {
         let conf = Config::load().unwrap_or_default().fixup();
         let used_alternate_hook = conf.use_alternate_hook;
         let startup_buffer_size = conf.buffer_size;
-        let used_minhook = conf.use_minhook;
         Self {
             conf: conf.clone(),
             mixer: Mixer::new(),
             #[cfg(not(feature = "geode"))]
             playlayer: std::ptr::null_mut(), // PlayLayer::from_address(0)
             prev_times: ClickTimes::default(),
-            is_loading_clickpack: false,
-            clickpack_num_sounds: 0,
-            selected_clickpack: String::new(),
+            is_loading_clickpack: Arc::new(AtomicBool::new(false)),
             last_conf_save: Instant::now(),
             prev_conf: conf,
             prev_click_type: ClickType::None,
@@ -370,8 +359,6 @@ impl Default for Bot {
             // fmod_noise_sound: std::ptr::null_mut(),
             show_fmod_buffersize_warn: false,
             startup_buffer_size,
-            used_minhook,
-            selected_clickpack_path: PathBuf::new(),
             is_in_level: false,
             playlayer_time: 0.0,
             clickpack: Clickpack::default(),
@@ -550,6 +537,7 @@ impl Bot {
         // check env
         let toast_queue = self.toast_queue.clone();
         let preload_clickpack = |path: PathBuf| {
+            let is_loading_clickpack = self.is_loading_clickpack.clone();
             std::thread::spawn(move || {
                 Self::load_clickpack_thread(
                     |e| {
@@ -560,6 +548,7 @@ impl Bot {
                         })
                     },
                     &path,
+                    is_loading_clickpack,
                 )
             });
         };
@@ -623,6 +612,10 @@ impl Bot {
         self.prev_spam_offset = 0.0;
     }
 
+    pub fn on_exit(&mut self) {
+        self.on_init(0);
+    }
+
     pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {
         // log::info!(
         //     "on action: palyelayer: {:#x}, base: {:#x}",
@@ -631,7 +624,7 @@ impl Bot {
         // );
         //log::info!("push: {push}");
         if self.playlayer.is_null() {}
-        if self.clickpack_num_sounds == 0 || !self.is_in_level() || !self.conf.enabled {
+        if self.clickpack.num_sounds == 0 || !self.is_in_level() || !self.conf.enabled {
             return;
         }
         log::info!("pl time: {}", self.time());
@@ -957,11 +950,6 @@ impl Bot {
                     ui.label(RichText::new("Requires restart!").color(Color32::YELLOW));
                 }
             });
-            help_text(
-                ui,
-                "Use if the Debug tab in Clickbot doesn't appear when you enter a level.\nRequires restart!",
-                |ui| ui.checkbox(&mut self.conf.hook_wait, "Wait until hooking"),
-            );
             #[cfg(not(features = "geode"))]
             help_text(ui, "Show debug console", |ui| {
                 if ui
@@ -979,11 +967,6 @@ impl Bot {
                 ui,
                 "Synchronize actions with the timestep of the game",
                 |ui| ui.checkbox(&mut self.conf.use_playlayer_time, "Use PlayLayer time"),
-            );
-            help_text(
-                ui,
-                "Use MinHook instead of Retour for hooking",
-                |ui| ui.checkbox(&mut self.conf.use_minhook, "Use MinHook"),
             );
 
             ui.horizontal(|ui| {
@@ -1162,9 +1145,14 @@ impl Bot {
         });
     }
 
+    #[inline]
+    fn is_loading_clickpack(&self) -> bool {
+        self.is_loading_clickpack.load(Ordering::Relaxed)
+    }
+
     fn show_audio_window(&mut self, ui: &mut egui::Ui, toasts: &mut Toasts) {
         ui.add_enabled_ui(
-            self.clickpack.has_noise() && !self.is_loading_clickpack,
+            self.clickpack.has_noise() && !self.is_loading_clickpack(),
             |ui| {
                 ui.horizontal(|ui| {
                     if ui
@@ -1431,36 +1419,39 @@ impl Bot {
 
     fn unload_clickpack(&mut self) {
         self.clickpack = Clickpack::default();
-        self.clickpack_num_sounds = 0;
     }
 
-    fn load_clickpack_thread(err_fn: impl Fn(anyhow::Error), dir: &Path) {
+    fn load_clickpack_thread(
+        err_fn: impl Fn(anyhow::Error),
+        dir: &Path,
+        is_loading_clickpack: Arc<AtomicBool>,
+    ) {
         unsafe {
-            BOT.is_loading_clickpack = true;
-            log::info!("load clickpack thread");
-            BOT.clickpack = Clickpack::default();
-            let _ = BOT.clickpack.load_from_path(dir).map_err(|e| {
+            is_loading_clickpack.store(true, Ordering::Relaxed);
+            if let Ok(clickpack) = Clickpack::from_path(dir).map_err(|e| {
                 log::error!("failed to load clickpack: {e}");
                 err_fn(e);
-            });
-            BOT.clickpack_num_sounds = BOT.clickpack.num_sounds();
-            BOT.is_loading_clickpack = false;
+            }) {
+                BOT.clickpack = clickpack;
+            }
+            is_loading_clickpack.store(false, Ordering::Relaxed);
         }
     }
 
     fn select_clickpack_combobox(&mut self, ui: &mut egui::Ui, modal: Arc<Mutex<Modal>>) {
-        let ellipsis = if self.selected_clickpack.len() <= 14 {
-            self.selected_clickpack.clone()
+        let ellipsis = if self.clickpack.name.len() <= 14 {
+            self.clickpack.name.clone()
         } else {
-            format!("{:.14}…", self.selected_clickpack)
+            format!("{:.14}…", self.clickpack.name)
         };
         egui::ComboBox::from_label("Select clickpack")
             .selected_text(ellipsis)
             .show_ui(ui, |ui| {
                 for path in &self.clickpacks {
                     let dirname = path.file_name().unwrap().to_str().unwrap();
+                    let is_loading_clickpack = self.is_loading_clickpack.clone();
                     if ui
-                        .selectable_label(self.selected_clickpack == dirname, dirname)
+                        .selectable_label(self.clickpack.name == dirname, dirname)
                         .clicked()
                     {
                         let modal_moved = modal.clone();
@@ -1479,6 +1470,7 @@ impl Bot {
                                         .open();
                                 },
                                 &path,
+                                is_loading_clickpack,
                             );
                             unsafe { BOT.env.update(ClickpackEnv::Name(dirname_moved)) };
                         });
@@ -1498,6 +1490,7 @@ impl Bot {
                 .on_disabled_hover_text("Please wait...")
                 .clicked()
             {
+                let is_loading_clickpack = self.is_loading_clickpack.clone();
                 std::thread::spawn(move || {
                     let Some(dir) = FileDialog::new().pick_folder() else {
                         return;
@@ -1515,17 +1508,15 @@ impl Bot {
                                 .open();
                         },
                         &dir,
+                        is_loading_clickpack,
                     );
                     unsafe {
                         BOT.env.update(ClickpackEnv::Path(dir));
                     }
                 });
             }
-            if self.clickpack_num_sounds != 0 {
-                ui.label(format!(
-                    "Selected clickpack: \"{}\"",
-                    self.selected_clickpack
-                ));
+            if self.clickpack.num_sounds != 0 {
+                ui.label(format!("Selected clickpack: \"{}\"", self.clickpack.name));
             } else {
                 ui.label("...or put clickpacks in .zcb/clickpacks");
             }
@@ -1534,14 +1525,15 @@ impl Bot {
     }
 
     fn show_clickpack_window(&mut self, ui: &mut egui::Ui, modal: Arc<Mutex<Modal>>) {
-        if self.is_loading_clickpack {
+        let is_loading_clickpack = self.is_loading_clickpack();
+        if is_loading_clickpack {
             ui.horizontal(|ui| {
                 ui.label("Loading clickpack...");
                 ui.add(egui::Spinner::new());
             });
         }
 
-        ui.add_enabled_ui(!self.is_loading_clickpack, |ui| {
+        ui.add_enabled_ui(!is_loading_clickpack, |ui| {
             if !self.clickpacks.is_empty() {
                 help_text(
                     ui,
@@ -1571,7 +1563,7 @@ impl Bot {
             let mut is_combobox = false;
             ui.horizontal(|ui| {
                 is_combobox = self.select_clickpack_button(ui, modal);
-                if !self.selected_clickpack.is_empty() {
+                if !self.clickpack.name.is_empty() {
                     ui.style_mut().spacing.item_spacing.x = 4.0;
                     if ui.button("🗙").on_hover_text("Unload clickpack").clicked() {
                         self.unload_clickpack();
@@ -1586,25 +1578,21 @@ impl Bot {
             }
         });
 
-        if self.clickpack_num_sounds != 0 {
+        if self.clickpack.num_sounds != 0 {
             help_text(
                 ui,
                 "To add player 2 sounds, make a folder called \"player2\"\n\
                 and put sounds for the second player there",
                 |ui| {
-                    ui.label(format!("{} sounds", self.clickpack_num_sounds));
+                    ui.label(format!("{} sounds", self.clickpack.num_sounds));
                 },
             );
         }
 
-        if !self.is_loading_clickpack && self.is_in_level() {
+        if !is_loading_clickpack && self.is_in_level() {
             ui.separator();
             ui.collapsing("Debug", |ui| {
-                // let dur = Duration::from_secs_f64(self.prev_time);
-                // let ago = self.time() - dur.as_secs_f64();
-                // help_text(ui, &format!("{dur:?} since the start of the level"), |ui| {
-                //     ui.label(format!("Last action time: {dur:.2?} ({ago:.2}s ago)"));
-                // });
+                ui.label("Last click times:");
                 egui::Grid::new("times_grid")
                     .num_columns(2)
                     .striped(true)
@@ -1614,8 +1602,9 @@ impl Bot {
                             self.prev_times.left,
                             self.prev_times.right,
                         ] {
-                            ui.label(format!("{:.2?}", times[0]));
-                            ui.label(format!("{:.2?}", times[1]));
+                            for t in times {
+                                ui.label(format!("{:.3?}", t));
+                            }
                             ui.end_row();
                         }
                     });
@@ -1639,7 +1628,7 @@ impl Bot {
 
                 ui.label(format!(
                     "Clickpack path: {:?}",
-                    format_path_keep_root(&self.selected_clickpack_path)
+                    format_path_keep_root(&self.clickpack.path)
                 ));
                 // ui.label(format!("Is 2-player level / forced? {}", self.is_2player()));
             });

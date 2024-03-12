@@ -399,6 +399,9 @@ pub struct Clickpack {
     pub left2: PlayerClicks,
     pub right2: PlayerClicks,
     pub noise: Option<SoundWrapper>,
+    pub num_sounds: usize,
+    pub name: String,
+    pub path: PathBuf,
 }
 
 impl std::ops::Index<usize> for Clickpack {
@@ -462,34 +465,45 @@ impl Clickpack {
         self.noise = SoundWrapper::from_path(/*self.system*/ &path).ok();
     }
 
-    pub fn load_from_path(&mut self, clickpack_dir: &Path) -> Result<()> {
+    pub fn from_path(clickpack_dir: &Path) -> Result<Self> {
         log::info!("loading clickpack from path {clickpack_dir:?}");
+        let mut clickpack = Clickpack {
+            path: clickpack_dir.to_path_buf(),
+            name: clickpack_dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            ..Default::default()
+        };
         for (i, dir) in CLICKPACK_DIRNAMES.iter().enumerate() {
             let mut path = clickpack_dir.to_path_buf();
             path.push(dir);
             log::info!("loading from dir {path:?}");
 
-            self[i].load_from_subdirs(&path);
+            clickpack[i].load_from_subdirs(&path);
 
             // try to load noise from the sound directories
-            if !self.noise.is_some() {
-                self.load_noise(&path);
+            if !clickpack.noise.is_some() {
+                clickpack.load_noise(&path);
             }
         }
 
-        if !self.has_clicks() {
+        if !clickpack.has_clicks() {
             log::warn!("folders {CLICKPACK_DIRNAMES:?} were not found in the clickpack, assuming there is only one player");
 
-            self[0].load_from_subdirs(clickpack_dir);
+            clickpack[0].load_from_subdirs(clickpack_dir);
         }
 
         // try to load noise from the root clickpack dir
-        if !self.noise.is_some() {
-            self.load_noise(clickpack_dir);
+        if !clickpack.noise.is_some() {
+            clickpack.load_noise(clickpack_dir);
         }
 
-        if self.has_clicks() {
-            Ok(())
+        clickpack.num_sounds = clickpack.num_sounds();
+
+        if clickpack.has_clicks() {
+            Ok(clickpack)
         } else {
             Err(anyhow::anyhow!(
                 "no clicks found in clickpack, did you select the correct folder?"
