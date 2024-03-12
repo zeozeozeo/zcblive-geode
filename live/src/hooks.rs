@@ -10,9 +10,9 @@ pub static BASE: Lazy<usize> = Lazy::new(|| {
 });
 
 macro_rules! hook {
-    ($original:ident -> $hook:ident @ $base:expr ; $address:expr) => {
+    ($original:ident -> $hook:ident @ $addr:expr) => {
         $original
-            .initialize(::std::mem::transmute($base + $address), $hook)?
+            .initialize(::std::mem::transmute($addr), $hook)?
             .enable()?;
     };
 }
@@ -51,11 +51,11 @@ pub mod base_game_layer {
 pub unsafe fn init_hooks() -> Result<()> {
     {
         use play_layer::*;
-        hook!(INIT_ORIGINAL -> init @ *BASE ; 0x2DC4A0);
+        hook!(INIT_ORIGINAL -> init @ *BASE + 0x2DC4A0);
     }
     {
         use base_game_layer::*;
-        hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE ; 0x1B69F0);
+        hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x1B69F0);
     }
     Ok(())
 }

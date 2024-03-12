@@ -1605,6 +1605,20 @@ impl Bot {
                 // help_text(ui, &format!("{dur:?} since the start of the level"), |ui| {
                 //     ui.label(format!("Last action time: {dur:.2?} ({ago:.2}s ago)"));
                 // });
+                egui::Grid::new("times_grid")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for times in [
+                            self.prev_times.jump,
+                            self.prev_times.left,
+                            self.prev_times.right,
+                        ] {
+                            ui.label(format!("{:.2?}", times[0]));
+                            ui.label(format!("{:.2?}", times[1]));
+                            ui.end_row();
+                        }
+                    });
                 ui.label(format!("Last click type: {:?}", self.prev_click_type));
                 ui.label(format!(
                     "Last pitch: {:.4} ({} => {})",

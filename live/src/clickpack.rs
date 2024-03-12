@@ -70,8 +70,8 @@ impl Default for VolumeSettings {
         Self {
             enabled: true,
             spam_time: 0.3,
-            spam_vol_offset_factor: 0.9,
-            max_spam_vol_offset: 0.3,
+            spam_vol_offset_factor: 1.3,
+            max_spam_vol_offset: 0.6,
             change_releases_volume: false,
             global_volume: 1.0,
             volume_var: 0.2,
@@ -520,7 +520,7 @@ impl Clickpack {
         typ: ClickType,
         player2: bool,
         button: Button,
-    ) -> &SoundWrapper {
+    ) -> SoundWrapper {
         // try to get a random click/release from the player clicks
         // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
         // one click)
@@ -531,42 +531,40 @@ impl Clickpack {
         let l2 = &self.left2;
         let r2 = &self.right2;
 
-        // :tired_face:
-        macro_rules! random_click_ord {
-            ($typ:ident, $one:ident, $two:ident, $three:ident, $four:ident, $five:ident, $six: ident) => {
-                $one.random_click($typ).unwrap_or_else(|| {
-                    $two.random_click($typ).unwrap_or_else(|| {
-                        $three.random_click($typ).unwrap_or_else(|| {
-                            $four.random_click($typ).unwrap_or_else(|| {
-                                $five
-                                    .random_click($typ)
-                                    .unwrap_or_else(|| $six.random_click($typ).unwrap())
-                            })
-                        })
-                    })
-                })
-            };
+        fn get_first_valid_click<'a>(
+            sources: &'a [&'a PlayerClicks],
+            typ: ClickType,
+        ) -> SoundWrapper {
+            for source in sources {
+                if let Some(click) = source.random_click(typ) {
+                    return click.clone();
+                }
+            }
+            // this should never trigger unless we have a clickpack with 0 sounds,
+            // which is not going to lead us here
+            panic!("no valid clicks found, should be unreachable!");
         }
+
         match button {
             Button::Jump => {
                 if !player2 {
-                    random_click_ord!(typ, p1, p2, l1, r1, l2, r2)
+                    get_first_valid_click(&[p1, p2, l1, r1, l2, r2], typ)
                 } else {
-                    random_click_ord!(typ, p2, p1, l2, r2, l1, r1)
+                    get_first_valid_click(&[p2, p1, l2, r2, l1, r1], typ)
                 }
             }
             Button::Left => {
                 if !player2 {
-                    random_click_ord!(typ, l1, r1, p1, l2, r2, p2)
+                    get_first_valid_click(&[l1, r1, p1, l2, r2, p2], typ)
                 } else {
-                    random_click_ord!(typ, l2, r2, p2, l1, r1, p1)
+                    get_first_valid_click(&[l2, r2, p2, l1, r1, p1], typ)
                 }
             }
             Button::Right => {
                 if !player2 {
-                    random_click_ord!(typ, r1, l1, p1, r2, l2, p2)
+                    get_first_valid_click(&[r1, l1, p1, r2, l2, p2], typ)
                 } else {
-                    random_click_ord!(typ, r2, l2, p2, r1, l1, p1)
+                    get_first_valid_click(&[r2, l2, p2, r1, l1, p1], typ)
                 }
             }
         }
