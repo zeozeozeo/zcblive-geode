@@ -1,3 +1,5 @@
+#![allow(static_mut_refs)] // bleh!!
+
 use clipboard::{windows_clipboard::WindowsClipboardContext, ClipboardProvider};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::sync::Arc;

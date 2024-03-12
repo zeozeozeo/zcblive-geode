@@ -3,7 +3,7 @@ use kittyaudio::Sound;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Button {
     Jump = 1,
     Left = 2,
@@ -18,6 +18,10 @@ impl Button {
             3 => Self::Right,
             _ => panic!("invalid button value {b}, expected 1..=3"),
         }
+    }
+
+    pub const fn is_platformer(self) -> bool {
+        matches!(self, Self::Left | Self::Right)
     }
 }
 

@@ -6,8 +6,6 @@ build = "build.rs"
 
 [lib]
 crate-type = ["cdylib"]
-
-[profile.release]
 #lto = "fat"
 #codegen-units = 1
 #strip = true

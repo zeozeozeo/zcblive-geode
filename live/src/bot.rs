@@ -3,6 +3,7 @@ use crate::hooks;
 
 use crate::{
     clickpack::{Button, ClickType, Clickpack, Pitch, Timings, VolumeSettings},
+    game::PlayLayer,
     utils,
 };
 use anyhow::Result;
@@ -18,7 +19,6 @@ use once_cell::sync::Lazy;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use std::{
-    ffi::c_void,
     ops::RangeInclusive,
     path::{Path, PathBuf},
     process::Command,
@@ -299,7 +299,7 @@ pub struct Bot {
     pub conf: Config,
     pub mixer: Mixer,
     #[cfg(not(feature = "geode"))]
-    pub playlayer: *mut c_void, // PlayLayer
+    pub playlayer: PlayLayer,
     pub prev_times: ClickTimes,
     pub is_loading_clickpack: Arc<AtomicBool>,
     pub last_conf_save: Instant,
@@ -310,11 +310,9 @@ pub struct Bot {
     pub prev_spam_offset: f64,
     pub buffer_size_changed: bool,
     pub noise_sound: Option<SoundHandle>,
-    pub show_alternate_hook_warning: bool,
     pub did_reset_config: bool,
     pub clickpacks: Vec<PathBuf>,
     pub last_clickpack_reload: Instant,
-    pub used_alternate_hook: bool,
     // pub system: *mut FMOD_SYSTEM,
     // pub channel: *mut FMOD_CHANNEL,
     pub env: Env,
@@ -330,13 +328,12 @@ pub struct Bot {
 impl Default for Bot {
     fn default() -> Self {
         let conf = Config::load().unwrap_or_default().fixup();
-        let used_alternate_hook = conf.use_alternate_hook;
         let startup_buffer_size = conf.buffer_size;
         Self {
             conf: conf.clone(),
             mixer: Mixer::new(),
             #[cfg(not(feature = "geode"))]
-            playlayer: std::ptr::null_mut(), // PlayLayer::from_address(0)
+            playlayer: PlayLayer::NULL,
             prev_times: ClickTimes::default(),
             is_loading_clickpack: Arc::new(AtomicBool::new(false)),
             last_conf_save: Instant::now(),
@@ -347,11 +344,9 @@ impl Default for Bot {
             prev_spam_offset: f64::NAN,
             buffer_size_changed: false,
             noise_sound: None,
-            show_alternate_hook_warning: false,
             did_reset_config: false,
             clickpacks: vec![],
             last_clickpack_reload: Instant::now(),
-            used_alternate_hook,
             // system: std::ptr::null_mut(),
             // channel: std::ptr::null_mut(),
             env: Env::load(),
@@ -603,8 +598,8 @@ impl Bot {
         }
     }
 
-    pub fn on_init(&mut self, playlayer: usize) {
-        self.playlayer = playlayer as *mut c_void;
+    pub fn on_init(&mut self, playlayer: PlayLayer) {
+        self.playlayer = playlayer;
         self.prev_times = ClickTimes::default();
         self.prev_click_type = ClickType::None;
         self.prev_pitch = 0.0;
@@ -613,37 +608,24 @@ impl Bot {
     }
 
     pub fn on_exit(&mut self) {
-        self.on_init(0);
+        self.on_init(PlayLayer::NULL);
     }
 
     pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {
-        // log::info!(
-        //     "on action: palyelayer: {:#x}, base: {:#x}",
-        //     self.playlayer as usize,d
-        //     get_base()
-        // );
-        //log::info!("push: {push}");
-        if self.playlayer.is_null() {}
+        #[cfg(not(feature = "geode"))]
+        if self.playlayer.is_null() {
+            return;
+        }
         if self.clickpack.num_sounds == 0 || !self.is_in_level() || !self.conf.enabled {
             return;
         }
-        log::info!("pl time: {}", self.time());
-        // is_in_level
         #[cfg(not(feature = "geode"))]
-        if *(self.playlayer as *const bool).offset(0x2f17) || self.time() == 0.0 {
+        if self.playlayer.is_paused()
+            || self.time() == 0.0
+            || (!self.playlayer.level_settings().is_2player() && player2)
+        {
             return;
         }
-        // let pl_time = unsafe { *((self.playlayer as usize + 0x328) as *const f64)
-        // if unsafe { *((self.playlayer as usize + 0x2f17) as *const bool) } {
-        //     return;
-        // }
-
-        // if (!self.playlayer.level_settings().is_2player() && player2)
-        //     || self.playlayer.is_paused()
-        //     || (!push && self.playlayer.time() == 0.0)
-        // {
-        //     return;
-        // }
 
         let now = self.time();
         let prev_time = self.prev_times.get_prev_time(button, player2);
@@ -739,7 +721,7 @@ impl Bot {
         if cfg!(feature = "geode") {
             self.playlayer_time
         } else {
-            unsafe { *((self.playlayer as usize + 0x328) as *const f64) }
+            self.playlayer.time()
         }
     }
 
@@ -929,26 +911,9 @@ impl Bot {
             ui.horizontal(|ui| {
                 help_text(
                     ui,
-                    "Use an alternate pushbutton/releasebutton hook for bot compatibility",
-                    |ui| {
-                        if ui
-                            .checkbox(&mut self.conf.use_alternate_hook, "Use alternate hook")
-                            .changed()
-                        {
-                            self.show_alternate_hook_warning = !self.show_alternate_hook_warning;
-                            if self.show_alternate_hook_warning {
-                                toasts.add(Toast {
-                                    kind: ToastKind::Info,
-                                    text: "Changing this option requires a game restart!".into(),
-                                    options: ToastOptions::default().duration_in_seconds(2.0),
-                                });
-                            }
-                        }
-                    },
+                    "Use an alternate pushButton/releaseButton hook for bot compatibility",
+                    |ui| ui.checkbox(&mut self.conf.use_alternate_hook, "Use alternate hook"),
                 );
-                if self.show_alternate_hook_warning {
-                    ui.label(RichText::new("Requires restart!").color(Color32::YELLOW));
-                }
             });
             #[cfg(not(features = "geode"))]
             help_text(ui, "Show debug console", |ui| {
@@ -1610,7 +1575,7 @@ impl Bot {
                     });
                 ui.label(format!("Last click type: {:?}", self.prev_click_type));
                 ui.label(format!(
-                    "Last pitch: {:.4} ({} => {})",
+                    "Last pitch: {:.4} ({}..={})",
                     self.prev_pitch, self.conf.pitch.from, self.conf.pitch.to
                 ));
                 ui.label(format!(

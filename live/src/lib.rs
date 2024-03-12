@@ -1,8 +1,8 @@
 mod bot;
 mod clickpack;
 
-// #[cfg(not(feature = "geode"))]
-// mod game_manager;
+#[cfg(not(feature = "geode"))]
+mod game;
 
 #[cfg(not(feature = "geode"))]
 mod hooks;
