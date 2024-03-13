@@ -7,11 +7,12 @@ using namespace geode::prelude;
 // define the Rust library API (libzcblive is statically linked into the DLL)
 extern "C" {
 void zcblive_initialize();
+void zcblive_uninitialize();
 void zcblive_on_action(uint8_t button, bool player2, bool push);
 void zcblive_set_is_in_level(bool is_in_level);
 void zcblive_set_playlayer_time(double time);
 void zcblive_on_init(PlayLayer* playlayer);
-void zcblive_on_exit();
+void zcblive_on_quit();
 }
 
 // clang-format off
@@ -21,7 +22,13 @@ $on_mod(Loaded) {
 }
 // clang-format on
 
-double getTime() {
+// clang-format off
+$on_mod(Unloaded) {
+	zcblive_uninitialize();
+}
+// clang-format on
+
+inline double getTime() {
     return PlayLayer::get() ? (*(double*)((char*)PlayLayer::get() + 0x328))
                             : 0.0;
 }
@@ -59,7 +66,7 @@ class $modify(GJBaseGameLayer) {
 
 class $modify(PlayLayer) {
 	void onQuit() {
-		zcblive_on_exit();
+		zcblive_on_quit();
 		PlayLayer::onQuit();
 	}
 };

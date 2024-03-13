@@ -9,14 +9,16 @@ mod hooks;
 
 mod utils;
 
-use bot::BOT;
+use bot::{Bot, BOT};
 use clickpack::Button;
+use once_cell::sync::Lazy;
 use retour::static_detour;
 use std::{ffi::c_void, sync::Once};
 use windows::Win32::{
     Foundation::{BOOL, HMODULE, HWND, LPARAM, LRESULT, TRUE, WPARAM},
     Graphics::Gdi::{WindowFromDC, HDC},
     System::{
+        Console::FreeConsole,
         LibraryLoader::{FreeLibraryAndExitThread, GetModuleHandleA, GetProcAddress},
         SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
         Threading::{CreateThread, THREAD_CREATION_FLAGS},
@@ -66,8 +68,7 @@ unsafe extern "system" fn h_wndproc(
 }
 
 /// DLL entrypoint
-///
-/// # Safety
+#[cfg(not(feature = "geode"))]
 #[no_mangle]
 pub unsafe extern "system" fn DllMain(dll: u32, reason: u32, _reserved: *mut c_void) -> BOOL {
     match reason {
@@ -83,8 +84,7 @@ pub unsafe extern "system" fn DllMain(dll: u32, reason: u32, _reserved: *mut c_v
             .unwrap();
         }
         DLL_PROCESS_DETACH => {
-            #[cfg(not(feature = "geode"))]
-            let _ = hooks::disable_hooks().map_err(|e| log::error!("failed to disable hooks: {e}"));
+            zcblive_uninitialize();
             FreeLibraryAndExitThread(std::mem::transmute::<_, HMODULE>(dll), 0);
         }
         _ => {}
@@ -133,6 +133,8 @@ unsafe extern "system" fn zcblive_main(_hmod: *mut c_void) -> u32 {
     1
 }
 
+// DLL externs
+
 #[no_mangle]
 unsafe extern "C" fn zcblive_initialize() {
     // wait for enter key on panics
@@ -165,7 +167,22 @@ unsafe extern "C" fn zcblive_initialize() {
     BOT.init();
 }
 
-// DLL externs
+#[no_mangle]
+unsafe extern "C" fn zcblive_uninitialize() {
+    #[cfg(not(feature = "geode"))]
+    let _ = hooks::disable_hooks().map_err(|e| log::error!("failed to disable hooks: {e}"));
+
+    if h_wglSwapBuffers
+        .disable()
+        .map_err(|e| log::error!("failed to disable wglSwapBuffers: {e}"))
+        .is_ok()
+        && BOT.conf.show_console
+    {
+        let _ = FreeConsole().map_err(|e| log::error!("FreeConsole failed: {e}"));
+    }
+
+    BOT = Lazy::new(Box::<Bot>::default);
+}
 
 #[no_mangle]
 unsafe extern "C" fn zcblive_on_action(button: u8, player2: bool, push: bool) {
@@ -190,6 +207,6 @@ unsafe extern "C" fn zcblive_on_init(playlayer: usize) {
 
 /// equivalent to passing NULL to `zcblive_on_init`
 #[no_mangle]
-unsafe extern "C" fn zcblive_on_exit() {
+unsafe extern "C" fn zcblive_on_quit() {
     BOT.on_exit()
 }

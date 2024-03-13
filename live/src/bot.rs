@@ -606,6 +606,7 @@ impl Bot {
         self.prev_pitch = 0.0;
         self.prev_volume = self.conf.volume_settings.global_volume;
         self.prev_spam_offset = 0.0;
+        self.is_in_level = true;
     }
 
     pub fn on_exit(&mut self) {
@@ -627,7 +628,7 @@ impl Bot {
         #[cfg(not(feature = "geode"))]
         if self.playlayer.is_paused()
             || self.time() == 0.0
-            || (!self.playlayer.level_settings().is_2player() && player2)
+            || (player2 && !self.playlayer.level_settings().is_2player())
         {
             return;
         }
