@@ -20,8 +20,8 @@ set_target_properties(zcblive_rust PROPERTIES IMPORTED_LOCATION_RELEASE ${CMAKE_
 target_link_libraries(${PROJECT_NAME} zcblive_rust)
 
 # Force 32-bit on 64-bit clang, link windows libs required by the Rust library (terrible i know)
-set(CMAKE_C_FLAGS "-m32 -lntdll -lsynchronization")
-set(CMAKE_CXX_FLAGS "-m32 -lntdll -lsynchronization")
+set(CMAKE_C_FLAGS "-m32")
+set(CMAKE_CXX_FLAGS "-m32")
 
 if (NOT DEFINED ENV{GEODE_SDK})
     message(FATAL_ERROR "Unable to find Geode SDK! Please define GEODE_SDK environment variable to point to Geode")

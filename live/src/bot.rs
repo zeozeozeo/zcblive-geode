@@ -2,7 +2,7 @@
 use crate::{game::PlayLayer, hooks};
 
 use crate::{
-    clickpack::{Button, ClickType, Clickpack, Pitch, Timings, VolumeSettings},
+    clickpack::{Button, ClickType, Clickpack, LoadClickpackFor, Pitch, Timings, VolumeSettings},
     utils,
 };
 use anyhow::Result;
@@ -62,7 +62,7 @@ impl Default for Shortcuts {
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub enum ClickpackEnv {
     #[default]
     None,
@@ -73,14 +73,14 @@ pub enum ClickpackEnv {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Env {
     version: String,
-    clickpack_env: ClickpackEnv,
+    clickpack_ord: Vec<(ClickpackEnv, LoadClickpackFor)>,
 }
 
 impl Default for Env {
     fn default() -> Self {
         Self {
             version: built_info::PKG_VERSION.to_string(),
-            clickpack_env: ClickpackEnv::None,
+            clickpack_ord: vec![(ClickpackEnv::None, LoadClickpackFor::All)],
         }
     }
 }
@@ -120,8 +120,14 @@ impl Env {
         }
     }
 
-    pub fn update(&mut self, clickpack_env: ClickpackEnv) {
-        self.clickpack_env = clickpack_env;
+    pub fn update(&mut self, clickpack_env: ClickpackEnv, load_for: LoadClickpackFor) {
+        match load_for {
+            LoadClickpackFor::All => self.clickpack_ord = vec![(clickpack_env, load_for)],
+            _ => {
+                log::info!("pushing to ord: ({:?}, {:?})", clickpack_env, load_for);
+                self.clickpack_ord.push((clickpack_env, load_for));
+            }
+        }
         self.save();
     }
 }
@@ -188,6 +194,8 @@ pub struct Config {
     // pub sync_speed_with_game: bool,
     #[serde(default = "float_one")]
     pub noise_speedhack: f64,
+    #[serde(default = "LoadClickpackFor::default")]
+    pub load_clickpack_for: LoadClickpackFor,
 }
 
 impl Config {
@@ -224,6 +232,7 @@ impl Default for Config {
             cut_by_releases: false,
             click_speedhack: 1.0,
             noise_speedhack: 1.0,
+            load_clickpack_for: LoadClickpackFor::All,
         }
     }
 }
@@ -298,15 +307,12 @@ pub struct Bot {
     pub playlayer: PlayLayer,
     pub prev_times: ClickTimes,
     pub is_loading_clickpack: Arc<AtomicBool>,
-    pub last_conf_save: Instant,
-    pub prev_conf: Config,
     pub prev_click_type: ClickType,
     pub prev_pitch: f64,
     pub prev_volume: f64,
     pub prev_spam_offset: f64,
     pub buffer_size_changed: bool,
     pub noise_sound: Option<SoundHandle>,
-    pub did_reset_config: bool,
     pub clickpacks: Vec<PathBuf>,
     pub last_clickpack_reload: Instant,
     // pub system: *mut FMOD_SYSTEM,
@@ -326,21 +332,18 @@ impl Default for Bot {
         let conf = Config::load().unwrap_or_default().fixup();
         let startup_buffer_size = conf.buffer_size;
         Self {
-            conf: conf.clone(),
+            conf,
             mixer: Mixer::new(),
             #[cfg(not(feature = "geode"))]
             playlayer: PlayLayer::NULL,
             prev_times: ClickTimes::default(),
             is_loading_clickpack: Arc::new(AtomicBool::new(false)),
-            last_conf_save: Instant::now(),
-            prev_conf: conf,
             prev_click_type: ClickType::None,
             prev_pitch: f64::NAN,
             prev_volume: f64::NAN,
             prev_spam_offset: f64::NAN,
             buffer_size_changed: false,
             noise_sound: None,
-            did_reset_config: false,
             clickpacks: vec![],
             last_clickpack_reload: Instant::now(),
             // system: std::ptr::null_mut(),
@@ -391,6 +394,18 @@ fn gd_audio_pitch() -> f32 {
     pitch
 }
 */
+
+fn show_error_dialog(modal: Arc<Mutex<Modal>>, title: &str, body: &str) {
+    log::error!("{title}: {body}");
+    modal
+        .lock()
+        .unwrap()
+        .dialog()
+        .with_title(title)
+        .with_body(utils::capitalize_first_letter(body))
+        .with_icon(Icon::Error)
+        .open();
+}
 
 fn drag_value<Num: emath::Numeric>(
     ui: &mut egui::Ui,
@@ -525,9 +540,32 @@ impl Bot {
             .reload_clickpacks()
             .map_err(|e| log::error!("failed to reload clickpacks: {e}"));
 
-        // check env
-        let toast_queue = self.toast_queue.clone();
-        let preload_clickpack = |path: PathBuf| {
+        // preload clickpack
+        self.preload_clickpack();
+
+        // init game hooks
+        #[cfg(not(feature = "geode"))]
+        {
+            log::debug!("initializing hooks");
+            unsafe { hooks::init_hooks().unwrap() };
+        }
+    }
+
+    fn preload_clickpack(&mut self) {
+        log::info!("preloading clickpack, order: {:?}", self.env.clickpack_ord);
+        use std::thread::JoinHandle;
+
+        let preload_clickpack = |path: PathBuf,
+                                 toast_queue: Arc<Mutex<Vec<Toast>>>,
+                                 join_handle: Option<JoinHandle<()>>,
+                                 load_for: LoadClickpackFor|
+         -> JoinHandle<()> {
+            // wait for the last spawned thread finish first; order is important here
+            // (clickpack loading is not threadsafe)
+            if let Some(handle) = join_handle {
+                handle.join().unwrap();
+            }
+
             let is_loading_clickpack = self.is_loading_clickpack.clone();
             std::thread::spawn(move || {
                 Self::load_clickpack_thread(
@@ -540,41 +578,47 @@ impl Bot {
                     },
                     &path,
                     is_loading_clickpack,
+                    load_for,
                 )
-            });
+            })
         };
 
-        // preload clickpack
-        log::info!("preloading clickpack");
-        match &self.env.clickpack_env {
-            ClickpackEnv::Name(name) => {
-                let mut found = false;
-                for path in &self.clickpacks {
-                    if path.file_name().unwrap().to_str().unwrap() == name {
-                        preload_clickpack(path.clone());
-                        found = true;
-                        break;
+        let mut prev_join_handle: Option<JoinHandle<()>> = None;
+        for (clickpack_env, load_for) in &self.env.clickpack_ord {
+            log::info!("preloading clickpack {clickpack_env:?} for {load_for:?}");
+            match clickpack_env {
+                ClickpackEnv::Name(name) => {
+                    let mut found = false;
+                    for path in &self.clickpacks {
+                        if path.file_name().unwrap().to_str().unwrap() == name {
+                            prev_join_handle = Some(preload_clickpack(
+                                path.clone(),
+                                self.toast_queue.clone(),
+                                prev_join_handle,
+                                *load_for,
+                            ));
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        self.toast_queue.lock().unwrap().push(Toast {
+                            kind: ToastKind::Error,
+                            text: format!("Clickpack \"{name}\" not found").into(),
+                            options: ToastOptions::default().duration_in_seconds(3.0),
+                        })
                     }
                 }
-                if !found {
-                    self.toast_queue.lock().unwrap().push(Toast {
-                        kind: ToastKind::Error,
-                        text: format!("Clickpack \"{name}\" not found").into(),
-                        options: ToastOptions::default().duration_in_seconds(3.0),
-                    })
+                ClickpackEnv::Path(path) => {
+                    prev_join_handle = Some(preload_clickpack(
+                        path.clone(),
+                        self.toast_queue.clone(),
+                        prev_join_handle,
+                        *load_for,
+                    ));
                 }
+                ClickpackEnv::None => log::info!("env.json doesn't specify a clickpack"),
             }
-            ClickpackEnv::Path(path) => {
-                preload_clickpack(path.clone());
-            }
-            ClickpackEnv::None => log::info!("env.json doesn't specify a clickpack"),
-        }
-
-        // init game hooks
-        #[cfg(not(feature = "geode"))]
-        {
-            log::debug!("initializing hooks");
-            unsafe { hooks::init_hooks().unwrap() };
         }
     }
 
@@ -787,17 +831,7 @@ impl Bot {
             self.play_noise();
         }
 
-        // auto-save config
-        if self.last_conf_save.elapsed() > Duration::from_secs(2)
-            && self.conf != self.prev_conf
-            && !self.did_reset_config
-        {
-            self.conf.save();
-            self.last_conf_save = Instant::now();
-            self.prev_conf = self.conf.clone();
-        }
-
-        // don't draw/autosave if not open
+        // don't draw and don't reload clickpacks if not open
         if self.conf.hidden {
             return;
         }
@@ -807,6 +841,13 @@ impl Bot {
             let _ = self
                 .reload_clickpacks()
                 .map_err(|e| log::error!("failed to reload clickpacks: {e}"));
+            if !self.clickpacks.contains(&self.clickpack.path) {
+                log::info!(
+                    "selected clickpack {:?} not found after reload, unloading",
+                    self.clickpack.path
+                );
+                self.unload_clickpack();
+            }
             self.last_clickpack_reload = Instant::now();
         }
 
@@ -954,17 +995,11 @@ impl Bot {
                     .clicked()
                 {
                     self.conf.save();
-                    self.did_reset_config = false;
-                    self.prev_conf = self.conf.clone();
                     toasts.add(Toast {
                         kind: ToastKind::Success,
                         text: "Saved configuration to .zcb/config.json".into(),
                         options: ToastOptions::default().duration_in_seconds(2.0),
                     });
-                }
-                if self.conf != self.prev_conf {
-                    ui.style_mut().spacing.item_spacing.x = 4.0;
-                    ui.label("(!)").on_hover_text("Unsaved changes");
                 }
                 ui.style_mut().spacing.item_spacing.x = 4.0;
                 if ui
@@ -982,14 +1017,7 @@ impl Bot {
                             options: ToastOptions::default().duration_in_seconds(2.0),
                         });
                     } else if let Err(e) = conf {
-                        modal
-                            .lock()
-                            .unwrap()
-                            .dialog()
-                            .with_title("Failed to load config!")
-                            .with_body(utils::capitalize_first_letter(&e.to_string()))
-                            .with_icon(Icon::Error)
-                            .open();
+                        show_error_dialog(modal.clone(), "Failed to load config!", &e.to_string());
                     }
                 }
                 ui.style_mut().spacing.item_spacing.x = 4.0;
@@ -1001,7 +1029,6 @@ impl Bot {
                     let prev_stage = self.conf.stage;
                     self.conf = Config::default();
                     self.conf.stage = prev_stage; // don't switch current tab
-                    self.did_reset_config = true;
                     self.apply_config();
                     toasts.add(Toast {
                         kind: ToastKind::Info,
@@ -1016,13 +1043,11 @@ impl Bot {
                 {
                     let _ = std::fs::create_dir_all(".zcb")
                         .map_err(|e| log::error!("failed to create .zcb: {e}"));
-                    Command::new("explorer").arg(".zcb").spawn().unwrap();
+                    let _ = Command::new("explorer").arg(".zcb").spawn().map_err(|e| {
+                        show_error_dialog(modal, "Failed to open folder!", &e.to_string());
+                    });
                 }
             });
-            ui.label(format!(
-                "Last saved {:.2?}s ago",
-                self.last_conf_save.elapsed().as_secs_f32()
-            ));
         });
         ui.allocate_space(ui.available_size() - vec2(0.0, 280.0));
     }
@@ -1392,15 +1417,17 @@ impl Bot {
         err_fn: impl Fn(anyhow::Error),
         dir: &Path,
         is_loading_clickpack: Arc<AtomicBool>,
+        load_for: LoadClickpackFor,
     ) {
         unsafe {
             is_loading_clickpack.store(true, Ordering::Relaxed);
-            if let Ok(clickpack) = Clickpack::from_path(dir).map_err(|e| {
+            if load_for == LoadClickpackFor::All {
+                BOT.unload_clickpack();
+            }
+            let _ = BOT.clickpack.load_from_path(dir, load_for).map_err(|e| {
                 log::error!("failed to load clickpack: {e}");
                 err_fn(e);
-            }) {
-                BOT.clickpack = clickpack;
-            }
+            });
             is_loading_clickpack.store(false, Ordering::Relaxed);
         }
     }
@@ -1417,6 +1444,7 @@ impl Bot {
                 for path in &self.clickpacks {
                     let dirname = path.file_name().unwrap().to_str().unwrap();
                     let is_loading_clickpack = self.is_loading_clickpack.clone();
+                    let load_for = self.conf.load_clickpack_for;
                     if ui
                         .selectable_label(self.clickpack.name == dirname, dirname)
                         .clicked()
@@ -1427,19 +1455,17 @@ impl Bot {
                         std::thread::spawn(move || {
                             Self::load_clickpack_thread(
                                 |e| {
-                                    modal_moved
-                                        .lock()
-                                        .unwrap()
-                                        .dialog()
-                                        .with_title("Failed to load clickpack!")
-                                        .with_body(utils::capitalize_first_letter(&e.to_string()))
-                                        .with_icon(Icon::Error)
-                                        .open();
+                                    show_error_dialog(
+                                        modal_moved.clone(),
+                                        "Failed to load clickpack!",
+                                        &e.to_string(),
+                                    );
                                 },
                                 &path,
                                 is_loading_clickpack,
+                                load_for,
                             );
-                            unsafe { BOT.env.update(ClickpackEnv::Name(dirname_moved)) };
+                            unsafe { BOT.env.update(ClickpackEnv::Name(dirname_moved), load_for) };
                         });
                     }
                 }
@@ -1454,10 +1480,11 @@ impl Bot {
         ui.horizontal(|ui| {
             if ui
                 .button("Select clickpack")
-                .on_disabled_hover_text("Please wait...")
+                .on_disabled_hover_text("Please wait…")
                 .clicked()
             {
                 let is_loading_clickpack = self.is_loading_clickpack.clone();
+                let load_for = self.conf.load_clickpack_for;
                 std::thread::spawn(move || {
                     let Some(dir) = FileDialog::new().pick_folder() else {
                         return;
@@ -1465,37 +1492,60 @@ impl Bot {
                     log::debug!("selected clickpack {:?}", dir);
                     Self::load_clickpack_thread(
                         |e| {
-                            modal
-                                .lock()
-                                .unwrap()
-                                .dialog()
-                                .with_title("Failed to load clickpack!")
-                                .with_body(utils::capitalize_first_letter(&e.to_string()))
-                                .with_icon(Icon::Error)
-                                .open();
+                            show_error_dialog(
+                                modal.clone(),
+                                "Failed to load clickpack!",
+                                &e.to_string(),
+                            );
                         },
                         &dir,
                         is_loading_clickpack,
+                        load_for,
                     );
                     unsafe {
-                        BOT.env.update(ClickpackEnv::Path(dir));
+                        BOT.env.update(ClickpackEnv::Path(dir), load_for);
                     }
                 });
             }
             if self.clickpack.num_sounds != 0 {
                 ui.label(format!("Selected clickpack: \"{}\"", self.clickpack.name));
             } else {
-                ui.label("...or put clickpacks in .zcb/clickpacks");
+                ui.label("…or put clickpacks in .zcb/clickpacks");
             }
         });
         false
+    }
+
+    fn show_select_clickpack_for_combobox(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Select clickpack for:");
+            egui::ComboBox::new("select_clickpack_for_combobox", "")
+                .selected_text(format!("{:?}", self.conf.load_clickpack_for))
+                .show_ui(ui, |ui| {
+                    for load_for in [
+                        LoadClickpackFor::All,
+                        LoadClickpackFor::Player1,
+                        LoadClickpackFor::Player2,
+                        LoadClickpackFor::Left1,
+                        LoadClickpackFor::Left2,
+                        LoadClickpackFor::Right1,
+                        LoadClickpackFor::Right2,
+                    ] {
+                        ui.selectable_value(
+                            &mut self.conf.load_clickpack_for,
+                            load_for,
+                            format!("{:?}", load_for),
+                        );
+                    }
+                });
+        });
     }
 
     fn show_clickpack_window(&mut self, ui: &mut egui::Ui, modal: Arc<Mutex<Modal>>) {
         let is_loading_clickpack = self.is_loading_clickpack();
         if is_loading_clickpack {
             ui.horizontal(|ui| {
-                ui.label("Loading clickpack...");
+                ui.label("Loading clickpack…");
                 ui.add(egui::Spinner::new());
             });
         }
@@ -1520,12 +1570,14 @@ impl Bot {
                 {
                     let _ = std::fs::create_dir_all(".zcb/clickpacks")
                         .map_err(|e| log::error!("failed to create .zcb/clickpacks: {e}"));
-                    Command::new("explorer")
+                    let _ = Command::new("explorer")
                         .arg(".zcb\\clickpacks")
                         .spawn()
-                        .unwrap();
+                        .map_err(|e| log::error!("failed to open .zcb/clickpacks: {e}"));
                 }
             };
+
+            self.show_select_clickpack_for_combobox(ui);
 
             let mut is_combobox = false;
             ui.horizontal(|ui| {
@@ -1534,6 +1586,7 @@ impl Bot {
                     ui.style_mut().spacing.item_spacing.x = 4.0;
                     if ui.button("🗙").on_hover_text("Unload clickpack").clicked() {
                         self.unload_clickpack();
+                        self.env.update(ClickpackEnv::None, LoadClickpackFor::All);
                     }
                 }
                 if is_combobox {
@@ -1597,7 +1650,6 @@ impl Bot {
                     "Clickpack path: {:?}",
                     format_path_keep_root(&self.clickpack.path)
                 ));
-                // ui.label(format!("Is 2-player level / forced? {}", self.is_2player()));
             });
         }
     }

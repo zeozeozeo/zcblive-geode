@@ -316,6 +316,10 @@ impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn load_from_dir(&mut self, path: &Path) {
         log::debug!("trying to match directory {path:?}");
+        if path.is_file() {
+            log::debug!("skipping matching file {path:?}");
+            return;
+        }
         let filename = path.file_name().unwrap().to_string_lossy();
         let patterns = [
             ("hard", "click", &mut self.hardclicks),
@@ -393,6 +397,17 @@ impl PlayerClicks {
         }
         None
     }
+
+    fn clear(&mut self) {
+        self.hardclicks.clear();
+        self.hardreleases.clear();
+        self.clicks.clear();
+        self.releases.clear();
+        self.softclicks.clear();
+        self.softreleases.clear();
+        self.microclicks.clear();
+        self.microreleases.clear();
+    }
 }
 
 #[derive(Default)]
@@ -441,6 +456,32 @@ impl std::ops::IndexMut<usize> for Clickpack {
 
 const CLICKPACK_DIRNAMES: [&str; 6] = ["player1", "player2", "left1", "left2", "right1", "right2"];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LoadClickpackFor {
+    #[default]
+    All,
+    Player1,
+    Player2,
+    Left1,
+    Left2,
+    Right1,
+    Right2,
+}
+
+impl LoadClickpackFor {
+    const fn to_index(self) -> usize {
+        match self {
+            Self::All => 0,
+            Self::Player1 => 1,
+            Self::Player2 => 2,
+            Self::Left1 => 3,
+            Self::Left2 => 4,
+            Self::Right1 => 5,
+            Self::Right2 => 6,
+        }
+    }
+}
+
 fn find_noise_file(dir: &Path) -> Option<PathBuf> {
     let Ok(dir) = dir.read_dir() else {
         return None;
@@ -470,49 +511,64 @@ impl Clickpack {
         self.noise = SoundWrapper::from_path(/*self.system*/ &path).ok();
     }
 
-    pub fn from_path(clickpack_dir: &Path) -> Result<Self> {
-        log::info!("loading clickpack from path {clickpack_dir:?}");
-        let mut clickpack = Clickpack {
-            path: clickpack_dir.to_path_buf(),
-            name: clickpack_dir
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string(),
-            ..Default::default()
-        };
+    pub fn load_from_path(
+        &mut self,
+        clickpack_dir: &Path,
+        load_for: LoadClickpackFor,
+    ) -> Result<()> {
+        log::info!("loading clickpack from path {clickpack_dir:?} for {load_for:?}");
+        self.path = clickpack_dir.to_path_buf();
+        self.name = clickpack_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        // this is probably the most confusing code i've ever written
+        let mut has_cleared = false;
         for (i, dir) in CLICKPACK_DIRNAMES.iter().enumerate() {
+            let sounds = &mut self[if load_for != LoadClickpackFor::All {
+                load_for.to_index() - 1 // because All is the first variant
+            } else {
+                i
+            }];
+            if load_for != LoadClickpackFor::All && !has_cleared {
+                sounds.clear();
+                has_cleared = true;
+            }
+
             let mut path = clickpack_dir.to_path_buf();
             path.push(dir);
             log::info!("loading from dir {path:?}");
 
-            clickpack[i].load_from_subdirs(&path);
+            sounds.load_from_subdirs(&path);
+            if load_for != LoadClickpackFor::All && sounds.num_sounds() == 0 {
+                log::warn!("directory {dir:?} was not found or has no clicks, assuming there isn't a subdirectory");
+                sounds.load_from_subdirs(clickpack_dir);
+            }
 
             // try to load noise from the sound directories
-            if !clickpack.noise.is_some() {
-                clickpack.load_noise(&path);
+            if !self.noise.is_some() {
+                self.load_noise(&path);
             }
         }
 
-        if !clickpack.has_clicks() {
+        if !self.has_clicks() {
             log::warn!("folders {CLICKPACK_DIRNAMES:?} were not found in the clickpack, assuming there is only one player");
-
-            clickpack[0].load_from_subdirs(clickpack_dir);
+            self[0].load_from_subdirs(clickpack_dir);
         }
 
         // try to load noise from the root clickpack dir
-        if !clickpack.noise.is_some() {
-            clickpack.load_noise(clickpack_dir);
+        if !self.noise.is_some() {
+            self.load_noise(clickpack_dir);
         }
 
-        clickpack.num_sounds = clickpack.num_sounds();
+        self.num_sounds = self.num_sounds();
 
-        if clickpack.has_clicks() {
-            Ok(clickpack)
+        if self.has_clicks() {
+            Ok(())
         } else {
-            Err(anyhow::anyhow!(
-                "no clicks found in clickpack, did you select the correct folder?"
-            ))
+            anyhow::bail!("no clicks found in clickpack, did you select the correct folder?")
         }
     }
 
