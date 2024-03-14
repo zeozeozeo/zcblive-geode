@@ -130,6 +130,12 @@ impl Env {
         }
         self.save();
     }
+
+    fn is_selected_by_path(&self) -> bool {
+        self.clickpack_ord
+            .iter()
+            .any(|c| matches!(c.0, ClickpackEnv::Path(_)))
+    }
 }
 
 const fn true_value() -> bool {
@@ -196,6 +202,8 @@ pub struct Config {
     pub noise_speedhack: f64,
     #[serde(default = "LoadClickpackFor::default")]
     pub load_clickpack_for: LoadClickpackFor,
+    #[serde(default = "bool::default")]
+    pub decouple_platformer: bool,
 }
 
 impl Config {
@@ -234,6 +242,7 @@ impl Default for Config {
             click_speedhack: 1.0,
             noise_speedhack: 1.0,
             load_clickpack_for: LoadClickpackFor::All,
+            decouple_platformer: false,
         }
     }
 }
@@ -284,19 +293,21 @@ pub struct ClickTimes {
 }
 
 impl ClickTimes {
-    fn set_time(&mut self, button: Button, player2: bool, time: f64) {
+    fn set_time(&mut self, button: Button, player2: bool, time: f64, decouple: bool) {
         match button {
             Button::Jump => self.jump[player2 as usize] = time,
             Button::Left => self.left[player2 as usize] = time,
-            Button::Right => self.right[player2 as usize] = time,
+            Button::Right => {
+                (if decouple { self.right } else { self.left })[player2 as usize] = time
+            }
         }
     }
 
-    fn get_prev_time(&self, button: Button, player2: bool) -> f64 {
+    fn get_prev_time(&self, button: Button, player2: bool, decouple: bool) -> f64 {
         match button {
-            Button::Left => self.left[player2 as usize],
-            Button::Right => self.right[player2 as usize],
             Button::Jump => self.jump[player2 as usize],
+            Button::Left => self.left[player2 as usize],
+            Button::Right => (if decouple { self.right } else { self.left })[player2 as usize],
         }
     }
 }
@@ -687,7 +698,9 @@ impl Bot {
         }
 
         let now = self.time();
-        let prev_time = self.prev_times.get_prev_time(button, player2);
+        let prev_time =
+            self.prev_times
+                .get_prev_time(button, player2, self.conf.decouple_platformer);
         let dt = (now - prev_time).abs();
         let click_type = ClickType::from_time(push, dt, &self.conf.timings);
         let use_fmod = self.conf.use_fmod;
@@ -721,6 +734,10 @@ impl Bot {
                 volume -= offset.min(vol.max_spam_vol_offset);
             } else {
                 self.prev_spam_offset = 0.0;
+            }
+
+            if button.is_platformer() {
+                volume += vol.platformer_volume_offset;
             }
 
             // multiply by global volume after all of the changes
@@ -770,7 +787,8 @@ impl Bot {
             }
             */
         }
-        self.prev_times.set_time(button, player2, now);
+        self.prev_times
+            .set_time(button, player2, now, self.conf.decouple_platformer);
         self.prev_click_type = click_type;
         self.prev_pitch = pitch;
     }
@@ -850,7 +868,10 @@ impl Bot {
             let _ = self
                 .reload_clickpacks()
                 .map_err(|e| log::error!("failed to reload clickpacks: {e}"));
-            if !self.clickpack.name.is_empty() && !self.clickpacks.contains(&self.clickpack.path) {
+            if !self.clickpack.name.is_empty()
+                && !self.env.is_selected_by_path()
+                && !self.clickpacks.contains(&self.clickpack.path)
+            {
                 log::info!(
                     "selected clickpack {:?} not found after reload, unloading",
                     self.clickpack.path
@@ -1221,6 +1242,18 @@ impl Bot {
         ui.collapsing("Timings", |ui| {
             let timings_copy = self.conf.timings.clone();
             let timings = &mut self.conf.timings;
+
+            help_text(
+                ui,
+                "Makes both platformer sounds have separate timings. Usually sounds bad",
+                |ui| {
+                    ui.checkbox(
+                        &mut self.conf.decouple_platformer,
+                        "Decouple platformer sounds",
+                    );
+                },
+            );
+
             drag_value(
                 ui,
                 &mut timings.hard,
@@ -1299,6 +1332,13 @@ impl Bot {
                 "Volume variation",
                 0.0..=f64::INFINITY,
                 "Random volume variation (+/-)",
+            );
+            drag_value(
+                ui,
+                &mut vol.platformer_volume_offset,
+                "Platformer volume offset",
+                f64::NEG_INFINITY..=f64::INFINITY,
+                "Offsets the volume for platformer sounds. If this value is -0.5, the volume will be 0.5",
             );
         });
 

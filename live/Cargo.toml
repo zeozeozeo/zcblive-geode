@@ -5,7 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib"] # `cdylib` for DLL, `staticlib` for Geode
 
 [profile.release]
 lto = "fat"

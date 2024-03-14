@@ -68,6 +68,7 @@ pub struct VolumeSettings {
     pub change_releases_volume: bool,
     pub global_volume: f64,
     pub volume_var: f64,
+    pub platformer_volume_offset: f64,
 }
 
 impl Default for VolumeSettings {
@@ -80,6 +81,7 @@ impl Default for VolumeSettings {
             change_releases_volume: false,
             global_volume: 1.0,
             volume_var: 0.2,
+            platformer_volume_offset: 0.0,
         }
     }
 }
