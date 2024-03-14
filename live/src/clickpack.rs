@@ -420,6 +420,7 @@ pub struct Clickpack {
     pub right2: PlayerClicks,
     pub noise: Option<SoundWrapper>,
     pub num_sounds: usize,
+    pub has_platformer_sounds: bool,
     pub name: String,
     pub path: PathBuf,
 }
@@ -564,6 +565,10 @@ impl Clickpack {
         }
 
         self.num_sounds = self.num_sounds();
+        self.has_platformer_sounds = self.left1.num_sounds() != 0
+            || self.right1.num_sounds() != 0
+            || self.left2.num_sounds() != 0
+            || self.right2.num_sounds() != 0;
 
         if self.has_clicks() {
             Ok(())

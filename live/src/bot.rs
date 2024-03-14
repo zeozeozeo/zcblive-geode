@@ -132,13 +132,11 @@ impl Env {
     }
 }
 
-#[inline]
-fn true_value() -> bool {
+const fn true_value() -> bool {
     true
 }
 
-#[inline]
-fn default_buffer_size() -> u32 {
+const fn default_buffer_size() -> u32 {
     512
 }
 
@@ -174,6 +172,8 @@ pub struct Config {
     pub play_noise: bool,
     #[serde(default = "float_one")]
     pub noise_volume: f64,
+    #[serde(default = "bool::default")]
+    pub force_playing_platformer: bool,
     #[serde(default = "bool::default")]
     pub use_alternate_hook: bool,
     #[serde(default = "bool::default")]
@@ -223,6 +223,7 @@ impl Default for Config {
             buffer_size: default_buffer_size(),
             play_noise: false,
             noise_volume: 1.0,
+            force_playing_platformer: false,
             use_alternate_hook: false,
             show_console: false,
             stage: Stage::default(),
@@ -563,7 +564,9 @@ impl Bot {
             // wait for the last spawned thread finish first; order is important here
             // (clickpack loading is not threadsafe)
             if let Some(handle) = join_handle {
+                log::info!("waiting for other preload thread to finish");
                 handle.join().unwrap();
+                log::info!("other preload thread finished, continuing");
             }
 
             let is_loading_clickpack = self.is_loading_clickpack.clone();
@@ -673,6 +676,12 @@ impl Bot {
         if self.playlayer.is_paused()
             || self.time() == 0.0
             || (player2 && !self.playlayer.level_settings().is_2player())
+        {
+            return;
+        }
+        if button.is_platformer()
+            && !self.conf.force_playing_platformer
+            && !self.clickpack.has_platformer_sounds
         {
             return;
         }
@@ -841,7 +850,7 @@ impl Bot {
             let _ = self
                 .reload_clickpacks()
                 .map_err(|e| log::error!("failed to reload clickpacks: {e}"));
-            if !self.clickpacks.contains(&self.clickpack.path) {
+            if !self.clickpack.name.is_empty() && !self.clickpacks.contains(&self.clickpack.path) {
                 log::info!(
                     "selected clickpack {:?} not found after reload, unloading",
                     self.clickpack.path
@@ -1176,6 +1185,17 @@ impl Bot {
                         self.play_noise(); // restart noise
                     }
                 });
+            },
+        );
+
+        help_text(
+            ui,
+            "Plays platformer left/right sounds even if your clickpack doesn't have them",
+            |ui| {
+                ui.checkbox(
+                    &mut self.conf.force_playing_platformer,
+                    "Force playing platformer sounds",
+                );
             },
         );
 
