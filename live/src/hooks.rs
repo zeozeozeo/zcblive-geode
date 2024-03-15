@@ -98,7 +98,6 @@ pub mod base_game_layer {
                 let playlayer = GameManager::shared().play_layer();
                 BOT.playlayer = playlayer;
 
-                // check if playlayer is null, just to be sure
                 if !playlayer.is_null() {
                     let b = Button::from_u8(button.try_into().unwrap());
 

@@ -169,8 +169,9 @@ unsafe extern "C" fn zcblive_initialize() {
 
 #[no_mangle]
 unsafe extern "C" fn zcblive_uninitialize() {
-    log::info!("saving config before detach...");
+    log::info!("saving config & env before detach...");
     BOT.conf.save();
+    BOT.env.save();
 
     #[cfg(not(feature = "geode"))]
     let _ = hooks::disable_hooks().map_err(|e| log::error!("failed to disable hooks: {e}"));

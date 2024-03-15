@@ -62,7 +62,7 @@ impl Default for Shortcuts {
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub enum ClickpackEnv {
     #[default]
     None,
@@ -124,6 +124,13 @@ impl Env {
         match load_for {
             LoadClickpackFor::All => self.clickpack_ord = vec![(clickpack_env, load_for)],
             _ => {
+                if self
+                    .clickpack_ord
+                    .contains(&(clickpack_env.clone(), load_for))
+                {
+                    log::info!("unnecessary update: ({:?}, {:?})", clickpack_env, load_for);
+                    return;
+                }
                 log::info!("pushing to ord: ({:?}, {:?})", clickpack_env, load_for);
                 self.clickpack_ord.push((clickpack_env, load_for));
             }
@@ -189,8 +196,6 @@ pub struct Config {
     #[serde(default = "bool::default")]
     pub use_fmod: bool,
     #[serde(default = "bool::default")]
-    pub use_playlayer_time: bool,
-    #[serde(default = "bool::default")]
     pub cut_sounds: bool,
     #[serde(default = "bool::default")]
     pub cut_by_releases: bool,
@@ -204,6 +209,8 @@ pub struct Config {
     pub load_clickpack_for: LoadClickpackFor,
     #[serde(default = "bool::default")]
     pub decouple_platformer: bool,
+    #[serde(default = "true_value")]
+    pub autosave_config: bool,
 }
 
 impl Config {
@@ -236,13 +243,13 @@ impl Default for Config {
             show_console: false,
             stage: Stage::default(),
             use_fmod: false,
-            use_playlayer_time: false,
             cut_sounds: false,
             cut_by_releases: false,
             click_speedhack: 1.0,
             noise_speedhack: 1.0,
             load_clickpack_for: LoadClickpackFor::All,
             decouple_platformer: false,
+            autosave_config: true,
         }
     }
 }
@@ -314,6 +321,8 @@ impl ClickTimes {
 
 pub struct Bot {
     pub conf: Config,
+    pub prev_conf: Config,
+    pub last_conf_save: Instant,
     pub mixer: Mixer,
     #[cfg(not(feature = "geode"))]
     pub playlayer: PlayLayer,
@@ -343,8 +352,11 @@ impl Default for Bot {
     fn default() -> Self {
         let conf = Config::load().unwrap_or_default().fixup();
         let startup_buffer_size = conf.buffer_size;
+        let now = Instant::now();
         Self {
-            conf,
+            conf: conf.clone(),
+            prev_conf: conf,
+            last_conf_save: now,
             mixer: Mixer::new(),
             #[cfg(not(feature = "geode"))]
             playlayer: PlayLayer::NULL,
@@ -357,7 +369,7 @@ impl Default for Bot {
             buffer_size_changed: false,
             noise_sound: None,
             clickpacks: vec![],
-            last_clickpack_reload: Instant::now(),
+            last_clickpack_reload: now,
             // system: std::ptr::null_mut(),
             // channel: std::ptr::null_mut(),
             env: Env::load(),
@@ -858,6 +870,13 @@ impl Bot {
             self.play_noise();
         }
 
+        // autosave config
+        if self.conf != self.prev_conf && self.last_conf_save.elapsed() > Duration::from_secs(5) {
+            self.last_conf_save = Instant::now();
+            self.conf.save();
+            self.prev_conf = self.conf.clone();
+        }
+
         // don't draw and don't reload clickpacks if not open
         if self.conf.hidden {
             return;
@@ -1010,8 +1029,8 @@ impl Bot {
             });
             help_text(
                 ui,
-                "Synchronize actions with the timestep of the game",
-                |ui| ui.checkbox(&mut self.conf.use_playlayer_time, "Use PlayLayer time"),
+                "Automatically save configuration changes every 5 seconds",
+                |ui| ui.checkbox(&mut self.conf.autosave_config, "Auto-save config"),
             );
 
             ui.horizontal(|ui| {
