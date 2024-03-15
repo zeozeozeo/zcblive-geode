@@ -68,6 +68,8 @@ unsafe extern "system" fn h_wndproc(
 }
 
 /// DLL entrypoint
+///
+/// # Safety
 #[cfg(not(feature = "geode"))]
 #[no_mangle]
 pub unsafe extern "system" fn DllMain(dll: u32, reason: u32, _reserved: *mut c_void) -> BOOL {

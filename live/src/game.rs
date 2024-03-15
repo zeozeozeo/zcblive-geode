@@ -10,7 +10,7 @@ macro_rules! impl_default {
         }
 
         pub const fn new(addr: usize) -> Self {
-            Self { addr: addr }
+            Self { addr }
         }
     };
 }

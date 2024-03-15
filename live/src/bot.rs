@@ -28,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(not(features = "geode"))]
+#[cfg(not(feature = "geode"))]
 use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 
 /// Global bot state
@@ -780,8 +780,10 @@ impl Bot {
                 sound.seek_to_end();
             }
         }
-        // FIXME: 22 fix
-        if !use_fmod || true {
+        // FIXME: temporary 2.2 fix
+        self.mixer.play(click);
+        /*
+        if !use_fmod {
             self.mixer.play(click);
         } else {
             /*
@@ -799,6 +801,7 @@ impl Bot {
             }
             */
         }
+        */
         self.prev_times
             .set_time(button, player2, now, self.conf.decouple_platformer);
         self.prev_click_type = click_type;
@@ -955,17 +958,15 @@ impl Bot {
         modal.lock().unwrap().show_dialog();
     }
 
-    #[cfg(not(features = "geode"))]
+    #[cfg(not(feature = "geode"))]
     pub fn maybe_alloc_console(&self) {
-        if self.conf.show_console {
-            if unsafe { AllocConsole() }.is_ok() {
-                static INIT_ONCE: Once = Once::new();
-                INIT_ONCE.call_once(|| {
-                    simple_logger::SimpleLogger::new()
-                        .init()
-                        .expect("failed to initialize simple_logger");
-                });
-            }
+        if self.conf.show_console && unsafe { AllocConsole() }.is_ok() {
+            static INIT_ONCE: Once = Once::new();
+            INIT_ONCE.call_once(|| {
+                simple_logger::SimpleLogger::new()
+                    .init()
+                    .expect("failed to initialize simple_logger");
+            });
         }
     }
 
@@ -979,14 +980,13 @@ impl Bot {
             let mut show_shortcut = |shortcut: &mut Shortcut, id: &'static str, name: &str| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| ui.add(Keybind::new(shortcut, id).with_text(name)));
-                    if *shortcut != Shortcut::NONE {
-                        if ui
+                    if *shortcut != Shortcut::NONE
+                        && ui
                             .button("Clear")
                             .on_hover_text("Set the shortcut to none")
                             .clicked()
-                        {
-                            *shortcut = Shortcut::NONE;
-                        }
+                    {
+                        *shortcut = Shortcut::NONE;
                     }
                 });
             };
@@ -1014,7 +1014,7 @@ impl Bot {
                     |ui| ui.checkbox(&mut self.conf.use_alternate_hook, "Use alternate hook"),
                 );
             });
-            #[cfg(not(features = "geode"))]
+            #[cfg(not(feature = "geode"))]
             help_text(ui, "Show debug console", |ui| {
                 if ui
                     .checkbox(&mut self.conf.show_console, "Show console")
@@ -1723,7 +1723,7 @@ impl Bot {
                     self.prev_spam_offset
                 ));
 
-                let format_path_keep_root = |path: &Path| path.to_string_lossy().replace("\\", "/");
+                let format_path_keep_root = |path: &Path| path.to_string_lossy().replace('\\', "/");
 
                 ui.label(format!(
                     "Clickpack path: {:?}",

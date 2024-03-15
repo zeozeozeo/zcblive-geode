@@ -105,7 +105,7 @@ pub mod base_game_layer {
                     // is not in platformer
                     let is_invalid_platformer = b.is_platformer()
                         && !(player1 && playlayer.player1().is_platformer())
-                        && !(!player1 && playlayer.player2().is_platformer());
+                        && (player1 || !playlayer.player2().is_platformer());
                     if !is_invalid_platformer {
                         BOT.on_action(b, !player1, push);
                     }

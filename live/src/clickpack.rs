@@ -551,7 +551,7 @@ impl Clickpack {
             }
 
             // try to load noise from the sound directories
-            if !self.noise.is_some() {
+            if self.noise.is_none() {
                 self.load_noise(&path);
             }
         }
@@ -562,7 +562,7 @@ impl Clickpack {
         }
 
         // try to load noise from the root clickpack dir
-        if !self.noise.is_some() {
+        if self.noise.is_none() {
             self.load_noise(clickpack_dir);
         }
 
