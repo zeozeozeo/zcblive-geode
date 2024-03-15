@@ -148,6 +148,7 @@ unsafe extern "C" fn zcblive_initialize() {
         std::process::exit(1);
     }));
 
+    #[cfg(not(feature = "geode"))]
     BOT.maybe_alloc_console();
 
     // get swapbuffers function
