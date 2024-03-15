@@ -6,7 +6,7 @@
     cargo build --release --features geode
     ```
     
-    then, to build the Geode wrapper:
+    then, to build the Geode wrapper ([docs](https://docs.geode-sdk.org/getting-started/create-mod/#build)):
 
     ```
     $ cd ..
