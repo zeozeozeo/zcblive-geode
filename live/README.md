@@ -1,9 +1,23 @@
 # Building
 
-```
-cargo build --release --features geode
-```
+
+- for geode (make sure `crate-type` in Cargo.toml is set to `staticlib`):
+    ```
+    cargo build --release --features geode
+    ```
+    
+    then, to build the Geode wrapper:
+
+    ```
+    $ cd ..
+    $ cmake --build build --config Release
+    ```
+
+- as a DLL (make sure `crate-type` in Cargo.toml is set to `cdylib`):
+    ```
+    cargo build --release
+    ```
 
 # Details
 
-- hooks.rs and game_manager.rs are not compiled with `--features geode`
+- `--features geode` disables compiling a lot of DLL-specific code
