@@ -74,6 +74,7 @@ pub enum ClickpackEnv {
 pub struct Env {
     version: String,
     clickpack_ord: Vec<(ClickpackEnv, LoadClickpackFor)>,
+    is_first_launch: bool,
 }
 
 impl Default for Env {
@@ -81,6 +82,7 @@ impl Default for Env {
         Self {
             version: built_info::PKG_VERSION.to_string(),
             clickpack_ord: vec![(ClickpackEnv::None, LoadClickpackFor::All)],
+            is_first_launch: true, // overriden later
         }
     }
 }
@@ -301,11 +303,23 @@ pub struct ClickTimes {
 
 impl ClickTimes {
     fn set_time(&mut self, button: Button, player2: bool, time: f64, decouple: bool) {
+        log::info!(
+            "setting time, button: {:?}, player2: {}, time: {time}, decouple: {decouple}",
+            button,
+            player2
+        );
         match button {
             Button::Jump => self.jump[player2 as usize] = time,
             Button::Left => self.left[player2 as usize] = time,
             Button::Right => {
-                (if decouple { self.right } else { self.left })[player2 as usize] = time
+                // TODO:
+                // WTF:  `(if decouple { self.right } else { self.left })[player2 as usize] = time``
+                //       causes a Rust miscompilation if `decouple` is false???
+                if decouple {
+                    self.right[player2 as usize] = time
+                } else {
+                    self.left[player2 as usize] = time
+                }
             }
         }
     }
@@ -346,6 +360,8 @@ pub struct Bot {
     pub is_in_level: bool,
     pub playlayer_time: f64,
     pub clickpack: Clickpack,
+    pub first_launch_dialog_timeout: f32,
+    pub level_start: Instant,
 }
 
 impl Default for Bot {
@@ -380,6 +396,8 @@ impl Default for Bot {
             is_in_level: false,
             playlayer_time: 0.0,
             clickpack: Clickpack::default(),
+            first_launch_dialog_timeout: 3.0,
+            level_start: now,
         }
     }
 }
@@ -677,6 +695,11 @@ impl Bot {
         self.prev_volume = self.conf.volume_settings.global_volume;
         self.prev_spam_offset = 0.0;
         self.is_in_level = true;
+        self.level_start = Instant::now();
+    }
+
+    pub fn on_reset(&mut self) {
+        self.level_start = Instant::now();
     }
 
     pub fn on_exit(&mut self) {
@@ -688,17 +711,14 @@ impl Bot {
     }
 
     pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {
-        #[cfg(not(feature = "geode"))]
-        if self.playlayer.is_null() {
-            return;
-        }
         if self.clickpack.num_sounds == 0 || !self.is_in_level() || !self.conf.enabled {
             return;
         }
         #[cfg(not(feature = "geode"))]
-        if self.playlayer.is_paused()
-            || self.time() == 0.0
-            || (player2 && !self.playlayer.level_settings().is_2player())
+        if !self.playlayer.is_null()
+            && (self.playlayer.is_paused()
+                || self.time() == 0.0
+                || (player2 && !self.playlayer.level_settings().is_2player()))
         {
             return;
         }
@@ -811,12 +831,16 @@ impl Bot {
     #[inline]
     fn time(&self) -> f64 {
         #[cfg(feature = "geode")]
-        {
+        if self.playlayer_time != 0.0 {
             self.playlayer_time
+        } else {
+            self.level_start.elapsed().as_secs_f64()
         }
         #[cfg(not(feature = "geode"))]
-        {
+        if !self.playlayer.is_null() {
             self.playlayer.time()
+        } else {
+            self.level_start.elapsed().as_secs_f64()
         }
     }
 
@@ -878,6 +902,37 @@ impl Bot {
             self.last_conf_save = Instant::now();
             self.conf.save();
             self.prev_conf = self.conf.clone();
+        }
+
+        // dialog on first launch
+        if self.env.is_first_launch {
+            let modal = Modal::new(ctx, "first_launch_dialog");
+            modal.show(|ui| {
+                modal.title(ui, "Welcome to ZCB Live!");
+                modal.body_and_icon(
+                    ui,
+                    "This seems to be your first time using ZCB Live.\n\
+                    • Press 1 to open the menu\n\
+                    • Press 2 to toggle the clickbot\n\
+                    You can change the hotkeys in the Options section",
+                    Icon::Info,
+                );
+                modal.buttons(ui, |ui| {
+                    if self.first_launch_dialog_timeout > 0.0 {
+                        ui.add_enabled_ui(false, |ui| {
+                            let _ = ui
+                                .button(format!("{:.0}…", self.first_launch_dialog_timeout.ceil()));
+                        });
+                        self.first_launch_dialog_timeout -= ctx.input(|i| i.unstable_dt);
+                    } else if ui.button("Got it").clicked() {
+                        self.env.is_first_launch = false;
+                        self.env.save();
+                        modal.close();
+                    }
+                    ui.hyperlink_to("Join the Discord server!", "https://discord.gg/BRVVVzxESu");
+                });
+            });
+            modal.open();
         }
 
         // don't draw and don't reload clickpacks if not open
@@ -1007,6 +1062,7 @@ impl Bot {
             );
         });
         ui.collapsing("Configuration", |ui| {
+            #[cfg(not(feature = "geode"))]
             ui.horizontal(|ui| {
                 help_text(
                     ui,
@@ -1029,7 +1085,8 @@ impl Bot {
             });
             help_text(
                 ui,
-                "Automatically save configuration changes every 5 seconds",
+                "Automatically save configuration changes every 5 seconds.\n\
+                If this is disabled, the config will still be saved on graceful exit",
                 |ui| ui.checkbox(&mut self.conf.autosave_config, "Auto-save config"),
             );
 
@@ -1037,10 +1094,7 @@ impl Bot {
                 ui.style_mut().spacing.item_spacing.x = 4.0;
                 if ui
                     .button("Save")
-                    .on_hover_text(
-                        "Save the current configuration.\n\
-                        This happens automatically, unless you reset your config!",
-                    )
+                    .on_hover_text("Save the current configuration")
                     .clicked()
                 {
                     self.conf.save();
@@ -1098,6 +1152,7 @@ impl Bot {
                 }
             });
         });
+        ui.hyperlink_to("Join the Discord server!", "https://discord.gg/BRVVVzxESu");
         ui.allocate_space(ui.available_size() - vec2(0.0, 280.0));
     }
 
@@ -1396,7 +1451,7 @@ impl Bot {
                 drag_value(
                     ui,
                     &mut self.conf.click_speedhack,
-                    "Click speedhack",
+                    "Click speed",
                     0.0..=f64::INFINITY,
                     "Speed multiplier for clicks/releases",
                 );
@@ -1408,7 +1463,7 @@ impl Bot {
                 if drag_value(
                     ui,
                     &mut self.conf.noise_speedhack,
-                    "Noise speedhack",
+                    "Noise speed",
                     0.0..=f64::INFINITY,
                     "Speed multiplier for noise. Only useful if your clickpack has a noise file",
                 )
@@ -1433,7 +1488,8 @@ impl Bot {
             let prev_bufsize = self.conf.buffer_size;
             help_text(
                 ui,
-                "Audio buffer size in samples.\nLower value means lower latency",
+                "Audio buffer size in samples. Lower value means lower latency.\n\
+                Click \"Apply\" below to apply changes (if any)",
                 |ui| {
                     ui.label("Buffer size");
                 },
@@ -1598,25 +1654,32 @@ impl Bot {
     fn show_select_clickpack_for_combobox(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Select clickpack for:");
-            egui::ComboBox::new("select_clickpack_for_combobox", "")
-                .selected_text(format!("{:?}", self.conf.load_clickpack_for))
-                .show_ui(ui, |ui| {
-                    for load_for in [
-                        LoadClickpackFor::All,
-                        LoadClickpackFor::Player1,
-                        LoadClickpackFor::Player2,
-                        LoadClickpackFor::Left1,
-                        LoadClickpackFor::Left2,
-                        LoadClickpackFor::Right1,
-                        LoadClickpackFor::Right2,
-                    ] {
-                        ui.selectable_value(
-                            &mut self.conf.load_clickpack_for,
-                            load_for,
-                            format!("{:?}", load_for),
-                        );
-                    }
-                });
+            help_text(
+                ui,
+                "Choose a player to load the clickpack for.\n\
+                E.g. if you choose Left1, the clickpack will be used for platformer sounds",
+                |ui| {
+                    egui::ComboBox::new("select_clickpack_for_combobox", "")
+                        .selected_text(format!("{:?}", self.conf.load_clickpack_for))
+                        .show_ui(ui, |ui| {
+                            for load_for in [
+                                LoadClickpackFor::All,
+                                LoadClickpackFor::Player1,
+                                LoadClickpackFor::Player2,
+                                LoadClickpackFor::Left1,
+                                LoadClickpackFor::Left2,
+                                LoadClickpackFor::Right1,
+                                LoadClickpackFor::Right2,
+                            ] {
+                                ui.selectable_value(
+                                    &mut self.conf.load_clickpack_for,
+                                    load_for,
+                                    format!("{:?}", load_for),
+                                );
+                            }
+                        });
+                },
+            );
         });
     }
 
@@ -1680,13 +1743,20 @@ impl Bot {
         if self.clickpack.num_sounds != 0 {
             help_text(
                 ui,
-                "To add player 2 sounds, make a folder called \"player2\"\n\
-                and put sounds for the second player there",
+                "To add player 2 sounds, make a folder called \"player2\" \
+                and put sounds for the second player there,\n\
+                or use \"Select clickpack for\" to select a \
+                seperate clickpack for the second player",
                 |ui| {
                     ui.label(format!("{} sounds", self.clickpack.num_sounds));
                 },
             );
         }
+
+        ui.hyperlink_to(
+            "Get more clickpacks in the Discord server!",
+            "https://discord.gg/BRVVVzxESu",
+        );
 
         if !is_loading_clickpack && self.is_in_level() {
             ui.separator();

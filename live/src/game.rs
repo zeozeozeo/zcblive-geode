@@ -105,5 +105,4 @@ pub struct BaseGameLayer {
 
 impl BaseGameLayer {
     impl_default!();
-    
 }

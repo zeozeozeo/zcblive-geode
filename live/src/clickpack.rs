@@ -3,7 +3,7 @@ use kittyaudio::Sound;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Button {
     Jump = 1,
     Left = 2,
@@ -536,13 +536,14 @@ impl Clickpack {
                 i
             }];
             if load_for != LoadClickpackFor::All && !has_cleared {
+                log::debug!("clearing sound list for {load_for:?}");
                 sounds.clear();
                 has_cleared = true;
             }
 
             let mut path = clickpack_dir.to_path_buf();
             path.push(dir);
-            log::info!("loading from dir {path:?}");
+            log::debug!("loading from dir {path:?}");
 
             sounds.load_from_subdirs(&path);
             if load_for != LoadClickpackFor::All && sounds.num_sounds() == 0 {

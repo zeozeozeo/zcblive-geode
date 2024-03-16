@@ -40,6 +40,7 @@ extern "C" {
 void zcblive_initialize();
 void zcblive_uninitialize();
 void zcblive_on_action(uint8_t button, bool player2, bool push);
+void zcblive_on_reset();
 void zcblive_set_is_in_level(bool is_in_level);
 void zcblive_set_playlayer_time(double time);
 void zcblive_on_init(PlayLayer* playlayer);
@@ -97,6 +98,11 @@ class $modify(PlayLayer) {
 	void onQuit() {
 		zcblive_on_quit();
 		PlayLayer::onQuit();
+	}
+
+	void resetLevel() {
+		zcblive_on_reset();
+		PlayLayer::resetLevel();
 	}
 };
 // clang-format on

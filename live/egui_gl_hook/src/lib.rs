@@ -167,12 +167,26 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
     // let pixels_per_point = dpi / 96.0;
 
     let egui::FullOutput {
-        platform_output: _,
+        platform_output,
         mut textures_delta,
         shapes,
         pixels_per_point,
         viewport_output: _,
     } = state.egui_ctx.run(raw_input, &*run_fn); // run through ui and get output
+
+    if let Some(open_url) = platform_output.open_url {
+        let _ = open::that(open_url.url).map_err(|e| eprintln!("failed to open url: {e}"));
+    }
+    if !platform_output.copied_text.is_empty() {
+        let _ = WindowsClipboardContext
+            .set_contents(platform_output.copied_text.clone())
+            .map_err(|e| {
+                eprintln!(
+                    "failed to set clipboard contents `{}`: {e}",
+                    platform_output.copied_text
+                )
+            });
+    }
 
     for (id, image_delta) in textures_delta.set {
         state.painter.set_texture(id, &image_delta);

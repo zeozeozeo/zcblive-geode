@@ -47,7 +47,7 @@ unsafe extern "system" fn h_wndproc(
 ) -> LRESULT {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        log::info!("CallWindowProcW hooked (new)");
+        log::info!("CallWindowProcW hooked");
     });
 
     if egui_gl_hook::is_init() {
@@ -151,6 +151,9 @@ unsafe extern "C" fn zcblive_initialize() {
     #[cfg(not(feature = "geode"))]
     BOT.maybe_alloc_console();
 
+    #[cfg(feature = "geode")]
+    let _ = simple_logger::SimpleLogger::new().init();
+
     // get swapbuffers function
     let opengl = GetModuleHandleA(windows::core::s!("OPENGL32.dll")).unwrap();
     let swap_buffers: FnWglSwapBuffers =
@@ -194,6 +197,11 @@ unsafe extern "C" fn zcblive_uninitialize() {
 #[no_mangle]
 unsafe extern "C" fn zcblive_on_action(button: u8, player2: bool, push: bool) {
     BOT.on_action(Button::from_u8(button), player2, push);
+}
+
+#[no_mangle]
+unsafe extern "C" fn zcblive_on_reset() {
+    BOT.on_reset();
 }
 
 #[no_mangle]
