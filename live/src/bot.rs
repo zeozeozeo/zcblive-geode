@@ -140,11 +140,11 @@ impl Env {
         self.save();
     }
 
-    fn is_selected_by_path(&self) -> bool {
-        self.clickpack_ord
-            .iter()
-            .any(|c| matches!(c.0, ClickpackEnv::Path(_)))
-    }
+    // fn is_selected_by_path(&self) -> bool {
+    //     self.clickpack_ord
+    //         .iter()
+    //         .any(|c| matches!(c.0, ClickpackEnv::Path(_)))
+    // }
 }
 
 const fn true_value() -> bool {
@@ -929,16 +929,16 @@ impl Bot {
             let _ = self
                 .reload_clickpacks()
                 .map_err(|e| log::error!("failed to reload clickpacks: {e}"));
-            if !self.clickpack.name.is_empty()
-                && !self.env.is_selected_by_path()
-                && !self.clickpacks.contains(&self.clickpack.path)
-            {
-                log::info!(
-                    "selected clickpack {:?} not found after reload, unloading",
-                    self.clickpack.path
-                );
-                self.unload_clickpack();
-            }
+            // if !self.clickpack.name.is_empty()
+            //     && !self.env.is_selected_by_path()
+            //     && !self.clickpacks.contains(&self.clickpack.path)
+            // {
+            //     log::info!(
+            //         "selected clickpack {:?} not found after reload, unloading",
+            //         self.clickpack.path
+            //     );
+            //     self.unload_clickpack();
+            // }
             self.last_clickpack_reload = Instant::now();
         }
 
