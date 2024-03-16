@@ -661,14 +661,6 @@ impl Bot {
         }
     }
 
-    #[inline]
-    fn is_in_level(&self) -> bool {
-        #[cfg(feature = "geode")]
-        return self.is_in_level;
-        #[cfg(not(feature = "geode"))]
-        return !self.playlayer.is_null();
-    }
-
     fn get_pitch(&self) -> f64 {
         if self.conf.pitch_enabled {
             utils::f64_range(self.conf.pitch.from..=self.conf.pitch.to)
@@ -699,14 +691,11 @@ impl Bot {
 
     pub fn on_exit(&mut self) {
         self.on_init(0);
-        #[cfg(feature = "geode")]
-        {
-            self.is_in_level = false;
-        }
+        self.is_in_level = false;
     }
 
     pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {
-        if self.clickpack.num_sounds == 0 || !self.is_in_level() || !self.conf.enabled {
+        if self.clickpack.num_sounds == 0 || !self.is_in_level || !self.conf.enabled {
             return;
         }
         #[cfg(not(feature = "geode"))]
@@ -1753,7 +1742,7 @@ impl Bot {
             "https://discord.gg/BRVVVzxESu",
         );
 
-        if !is_loading_clickpack && self.is_in_level() {
+        if !is_loading_clickpack && self.is_in_level {
             ui.separator();
             ui.collapsing("Debug", |ui| {
                 ui.label("Last click times:");

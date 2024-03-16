@@ -5,12 +5,12 @@ edition = "2021"
 build = "build.rs"
 
 [lib]
-crate-type = ["staticlib"] # `cdylib` for DLL, `staticlib` for Geode
+crate-type = ["cdylib"] # `cdylib` for DLL, `staticlib` for Geode
 
 [profile.release]
-#lto = "fat"
-#codegen-units = 1
-#strip = true
+lto = "fat"
+codegen-units = 1
+strip = true
 
 [workspace]
 members = [".", "egui_gl_hook", "gfmod"]
