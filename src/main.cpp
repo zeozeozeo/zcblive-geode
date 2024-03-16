@@ -67,15 +67,21 @@ inline double getTime() {
 
 // clang-format off
 class $modify(GJBaseGameLayer) {
+	// i love hooking dtors :D
+	void destructor() {
+		zcblive_on_quit();
+		GJBaseGameLayer::~GJBaseGameLayer();
+	}
+
 	void handleButton(bool push, int button, bool player1) {
 		zcblive_set_is_in_level(true);
 		zcblive_set_playlayer_time(getTime());
 
 		auto playLayer = PlayLayer::get();
-		bool is_invalid = ((button == 2 || button == 3)
-                        && !(player1 && playLayer && playLayer->m_player1->m_isPlatformer)
-                        && !(!player1 && playLayer && playLayer->m_player2->m_isPlatformer))
-						|| (!player1 && playLayer && !playLayer->m_levelSettings->m_twoPlayerMode);
+		bool is_invalid = playLayer && ((button == 2 || button == 3)
+                        && !(player1 && playLayer->m_player1->m_isPlatformer)
+                        && !(!player1 && playLayer->m_player2->m_isPlatformer))
+						|| (!player1 && !playLayer->m_levelSettings->m_twoPlayerMode);
 		if (!is_invalid) {
 			zcblive_on_action(button, !player1, push);
 		}
@@ -95,11 +101,6 @@ class $modify(GJBaseGameLayer) {
 };
 
 class $modify(PlayLayer) {
-	void onQuit() {
-		zcblive_on_quit();
-		PlayLayer::onQuit();
-	}
-
 	void resetLevel() {
 		zcblive_on_reset();
 		PlayLayer::resetLevel();

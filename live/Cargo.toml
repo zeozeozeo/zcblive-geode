@@ -6,9 +6,11 @@ build = "build.rs"
 
 [lib]
 crate-type = ["staticlib"] # `cdylib` for DLL, `staticlib` for Geode
-lto = "fat"
-codegen-units = 1
-strip = true
+
+[profile.release]
+#lto = "fat"
+#codegen-units = 1
+#strip = true
 
 [workspace]
 members = [".", "egui_gl_hook", "gfmod"]

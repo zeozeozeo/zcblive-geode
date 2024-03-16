@@ -303,11 +303,6 @@ pub struct ClickTimes {
 
 impl ClickTimes {
     fn set_time(&mut self, button: Button, player2: bool, time: f64, decouple: bool) {
-        log::info!(
-            "setting time, button: {:?}, player2: {}, time: {time}, decouple: {decouple}",
-            button,
-            player2
-        );
         match button {
             Button::Jump => self.jump[player2 as usize] = time,
             Button::Left => self.left[player2 as usize] = time,
@@ -703,11 +698,11 @@ impl Bot {
     }
 
     pub fn on_exit(&mut self) {
+        self.on_init(0);
         #[cfg(feature = "geode")]
         {
             self.is_in_level = false;
         }
-        self.on_init(0);
     }
 
     pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {

@@ -21,15 +21,7 @@ pub mod play_layer {
     use crate::{game::PlayLayer, BOT};
 
     retour::static_detour! {
-        pub static DESTRUCTOR_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer);
         pub static RESET_LEVEL_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer);
-    }
-
-    pub fn destructor(this: PlayLayer) {
-        unsafe {
-            BOT.on_exit();
-            DESTRUCTOR_ORIGINAL.call(this);
-        }
     }
 
     pub fn reset_level(this: PlayLayer) {
@@ -88,8 +80,16 @@ pub mod base_game_layer {
     use crate::{clickpack::Button, game::GameManager, BOT};
 
     retour::static_detour! {
+        pub static DESTRUCTOR_ORIGINAL: unsafe extern "fastcall" fn(usize);
         pub static INIT_ORIGINAL: unsafe extern "fastcall" fn (usize);
         pub static HANDLE_BUTTON_ORIGINAL: unsafe extern "fastcall" fn (usize, usize, bool, i32, bool);
+    }
+
+    pub fn destructor(this: usize) {
+        unsafe {
+            BOT.on_exit();
+            DESTRUCTOR_ORIGINAL.call(this);
+        }
     }
 
     pub fn init(this: usize) {
@@ -106,17 +106,16 @@ pub mod base_game_layer {
                 let playlayer = GameManager::shared().play_layer();
                 BOT.playlayer = playlayer;
 
-                if !playlayer.is_null() {
-                    let b = Button::from_u8(button.try_into().unwrap());
+                let b = Button::from_u8(button.try_into().unwrap());
 
-                    // check if the button is left or right but the player
-                    // is not in platformer
-                    let is_invalid_platformer = b.is_platformer()
-                        && !(player1 && playlayer.player1().is_platformer())
-                        && (player1 || !playlayer.player2().is_platformer());
-                    if !is_invalid_platformer {
-                        BOT.on_action(b, !player1, push);
-                    }
+                // check if the button is left or right but the player
+                // is not in platformer
+                let is_invalid_platformer = !playlayer.is_null()
+                    && b.is_platformer()
+                    && !(player1 && playlayer.player1().is_platformer())
+                    && (player1 || !playlayer.player2().is_platformer());
+                if !is_invalid_platformer {
+                    BOT.on_action(b, !player1, push);
                 }
             }
             HANDLE_BUTTON_ORIGINAL.call(this, 0, push, button, player1);
@@ -127,7 +126,6 @@ pub mod base_game_layer {
 pub unsafe fn init_hooks() -> Result<()> {
     {
         use play_layer::*;
-        hook!(DESTRUCTOR_ORIGINAL -> destructor @ *BASE + 0x2dc080);
         hook!(RESET_LEVEL_ORIGINAL -> reset_level @ *BASE + 0x2ea130);
     }
     {
@@ -137,6 +135,7 @@ pub unsafe fn init_hooks() -> Result<()> {
     }
     {
         use base_game_layer::*;
+        hook!(DESTRUCTOR_ORIGINAL -> destructor @ *BASE + 0x2dc080);
         hook!(INIT_ORIGINAL -> init @ *BASE + 0x190290);
         hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x1b69f0);
     }
@@ -146,7 +145,6 @@ pub unsafe fn init_hooks() -> Result<()> {
 pub unsafe fn disable_hooks() -> Result<()> {
     {
         use play_layer::*;
-        DESTRUCTOR_ORIGINAL.disable()?;
         RESET_LEVEL_ORIGINAL.disable()?;
     }
     {
@@ -156,6 +154,7 @@ pub unsafe fn disable_hooks() -> Result<()> {
     }
     {
         use base_game_layer::*;
+        DESTRUCTOR_ORIGINAL.disable()?;
         INIT_ORIGINAL.disable()?;
         HANDLE_BUTTON_ORIGINAL.disable()?;
     }
