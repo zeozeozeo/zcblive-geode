@@ -42,7 +42,7 @@ pub struct LevelSettings {
 
 impl LevelSettings {
     impl_default!();
-    impl_get_set!(is_2player, set_is_2player, bool, 0x115);
+    impl_get_set!(is_2player, set_is_2player, bool, 0x118);
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]

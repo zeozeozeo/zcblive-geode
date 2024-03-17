@@ -100,7 +100,6 @@ pub mod base_game_layer {
     }
 
     pub fn handle_button(this: usize, _edx: usize, push: bool, button: i32, player1: bool) {
-        // log::info!("handleButton({push}, {button}, {player1})");
         unsafe {
             if !BOT.conf.use_alternate_hook {
                 let playlayer = GameManager::shared().play_layer();

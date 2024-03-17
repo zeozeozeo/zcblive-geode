@@ -80,10 +80,13 @@ class $modify(GJBaseGameLayer) {
 		auto playLayer = PlayLayer::get();
 		bool is_invalid = playLayer && ((button == 2 || button == 3)
                         && !(player1 && playLayer->m_player1->m_isPlatformer)
-                        && !(!player1 && playLayer->m_player2->m_isPlatformer))
-						|| (!player1 && !playLayer->m_levelSettings->m_twoPlayerMode);
+                        && !(!player1 && playLayer->m_player2->m_isPlatformer));
 		if (!is_invalid) {
-			zcblive_on_action(button, !player1, push);
+			zcblive_on_action(
+				button,
+				!player1 && playLayer && playLayer->m_levelSettings->m_twoPlayerMode,
+				push
+			);
 		}
 		
 		GJBaseGameLayer::handleButton(push, button, player1);
