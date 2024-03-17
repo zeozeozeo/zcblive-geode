@@ -1050,7 +1050,7 @@ impl Bot {
             ui.horizontal(|ui| {
                 help_text(
                     ui,
-                    "Use an alternate pushButton/releaseButton hook for bot compatibility",
+                    "Use an alternate button hook for bot compatibility",
                     |ui| ui.checkbox(&mut self.conf.use_alternate_hook, "Use alternate hook"),
                 );
             });
