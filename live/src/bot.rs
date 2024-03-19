@@ -10,6 +10,7 @@ use egui::{
     emath, pos2, vec2, Align2, Color32, Direction, DragValue, Key, KeyboardShortcut, Modifiers,
     RichText,
 };
+use egui_clickpack_db::ClickpackDb;
 use egui_keybind::{Bind, Keybind, Shortcut};
 use egui_modal::{Icon, Modal};
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
@@ -126,13 +127,7 @@ impl Env {
         match load_for {
             LoadClickpackFor::All => self.clickpack_ord = vec![(clickpack_env, load_for)],
             _ => {
-                if self
-                    .clickpack_ord
-                    .contains(&(clickpack_env.clone(), load_for))
-                {
-                    log::info!("unnecessary update: ({:?}, {:?})", clickpack_env, load_for);
-                    return;
-                }
+                self.clickpack_ord.retain(|ord| ord.1 != load_for);
                 log::info!("pushing to ord: ({:?}, {:?})", clickpack_env, load_for);
                 self.clickpack_ord.push((clickpack_env, load_for));
             }
@@ -357,6 +352,8 @@ pub struct Bot {
     pub clickpack: Clickpack,
     pub first_launch_dialog_timeout: f32,
     pub level_start: Instant,
+    pub clickpack_db: ClickpackDb,
+    pub clickpack_db_open: bool,
 }
 
 impl Default for Bot {
@@ -393,6 +390,8 @@ impl Default for Bot {
             clickpack: Clickpack::default(),
             first_launch_dialog_timeout: 3.0,
             level_start: now,
+            clickpack_db: ClickpackDb::default(),
+            clickpack_db_open: false,
         }
     }
 }
@@ -471,6 +470,28 @@ fn drag_value<Num: emath::Numeric>(
         );
     });
     resp.unwrap()
+}
+
+const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/37.0.2062.94 Chrome/37.0.2062.94 Safari/537.36";
+
+fn ureq_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_read(Duration::from_secs(15))
+        .timeout_write(Duration::from_secs(15))
+        .user_agent(USER_AGENT)
+        .build()
+}
+
+fn ureq_get(url: &str) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    ureq_agent()
+        .get(url)
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_reader()
+        .read_to_end(&mut buf)
+        .map_err(|_| "failed to read body".to_string())?;
+    Ok(buf)
 }
 
 impl Bot {
@@ -992,6 +1013,8 @@ impl Bot {
                 };
             });
         });
+
+        self.show_clickpackdb_window(ctx, modal.clone());
 
         toasts.show(ctx);
         modal.lock().unwrap().show_dialog();
@@ -1736,14 +1759,22 @@ impl Bot {
                 },
             );
         }
-
-        ui.hyperlink_to(
-            "Get more clickpacks in the Discord server!",
-            "https://discord.gg/BRVVVzxESu",
-        );
+        ui.separator();
+        ui.collapsing("ClickpackDB", |ui| {
+            ui.label(
+                "ClickpackDB is a database of clickpacks \
+            that can easily be downloaded from within ZCB Live.",
+            );
+            if ui.button("Open ClickpackDB…").clicked() {
+                self.clickpack_db_open = true;
+            }
+        });
+        // ui.hyperlink_to(
+        //     "Get more clickpacks in the Discord server!",
+        //     "https://discord.gg/BRVVVzxESu",
+        // );
 
         if !is_loading_clickpack && self.is_in_level {
-            ui.separator();
             ui.collapsing("Debug", |ui| {
                 ui.label("Last click times:");
                 egui::Grid::new("times_grid")
@@ -1785,6 +1816,50 @@ impl Bot {
                 ));
             });
         }
+    }
+
+    fn show_clickpackdb_window(&mut self, ctx: &egui::Context, modal: Arc<Mutex<Modal>>) {
+        if !self.clickpack_db_open {
+            return;
+        }
+        egui::Window::new("ClickpackDB")
+            .open(&mut self.clickpack_db_open)
+            .show(ctx, |ui| {
+                self.clickpack_db.show(ui, &ureq_get);
+                if let Some(select_path) =
+                    std::mem::replace(&mut self.clickpack_db.select_clickpack, None)
+                {
+                    let is_loading_clickpack = self.is_loading_clickpack.clone();
+                    let load_for = self.conf.load_clickpack_for;
+                    let modal_moved = modal.clone();
+                    std::thread::spawn(move || {
+                        Self::load_clickpack_thread(
+                            |e| {
+                                show_error_dialog(
+                                    modal_moved.clone(),
+                                    "Failed to load clickpack!",
+                                    &e.to_string(),
+                                );
+                            },
+                            &select_path,
+                            is_loading_clickpack,
+                            load_for,
+                        );
+                        unsafe {
+                            BOT.env.update(
+                                ClickpackEnv::Name(
+                                    select_path
+                                        .file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .to_string(),
+                                ),
+                                load_for,
+                            )
+                        };
+                    });
+                }
+            });
     }
 }
 

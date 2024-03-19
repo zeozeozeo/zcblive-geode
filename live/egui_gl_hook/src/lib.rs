@@ -338,7 +338,7 @@ pub fn on_event(umsg: u32, wparam: usize, lparam: isize) -> Result<bool, Error> 
         WM_MOUSEWHEEL => {
             alter_modifiers(state, get_mouse_modifiers(wparam));
 
-            let delta = (wparam >> 16) as i16 as f32 * 10.0 / WHEEL_DELTA as f32;
+            let delta = (wparam >> 16) as i16 as f32 * 35.0 / WHEEL_DELTA as f32;
 
             if wparam & MK_CONTROL.0 as usize != 0 {
                 state
@@ -351,7 +351,7 @@ pub fn on_event(umsg: u32, wparam: usize, lparam: isize) -> Result<bool, Error> 
         WM_MOUSEHWHEEL => {
             alter_modifiers(state, get_mouse_modifiers(wparam));
 
-            let delta = (wparam >> 16) as i16 as f32 * 10.0 / WHEEL_DELTA as f32;
+            let delta = (wparam >> 16) as i16 as f32 * 35.0 / WHEEL_DELTA as f32;
 
             if wparam & MK_CONTROL.0 as usize != 0 {
                 state
