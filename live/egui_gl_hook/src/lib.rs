@@ -1,4 +1,4 @@
-#![allow(static_mut_refs)] // bleh!!
+#![allow(static_mut_ref)] // bleh!!
 
 use clipboard::{windows_clipboard::WindowsClipboardContext, ClipboardProvider};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
