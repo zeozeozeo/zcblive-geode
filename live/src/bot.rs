@@ -1761,10 +1761,18 @@ impl Bot {
         ui.separator();
         ui.collapsing("ClickpackDB", |ui| {
             ui.label(
-                "ClickpackDB is a database of clickpacks \
-            that can easily be downloaded from within ZCB Live.",
+                "ClickpackDB is a collection of 300+ clickpacks \
+                that can be easily downloaded from within ZCB Live.",
             );
-            if ui.button("Open ClickpackDB…").clicked() {
+            if self.clickpack_db_open {
+                if ui
+                    .button("Close ClickpackDB")
+                    .on_hover_text("This can also be done by clicking ✖ on the ClickpackDB window")
+                    .clicked()
+                {
+                    self.clickpack_db_open = false;
+                }
+            } else if ui.button("Open ClickpackDB…").clicked() {
                 self.clickpack_db_open = true;
             }
         });
@@ -1803,7 +1811,7 @@ impl Bot {
                     self.conf.volume_settings.global_volume
                 ));
                 ui.label(format!(
-                    "Last spam volume offset: {:.4}",
+                    "Last spam volume offset: -{:.4}",
                     self.prev_spam_offset
                 ));
 
@@ -1821,7 +1829,13 @@ impl Bot {
         if !self.clickpack_db_open {
             return;
         }
-        if !self.did_clickpack_db_mark && self.clickpack_db.db.read().unwrap().entries.len() != 0 {
+        if !self.did_clickpack_db_mark
+            && matches!(
+                *self.clickpack_db.status.read().unwrap(),
+                egui_clickpack_db::Status::Loaded { .. }
+            )
+        {
+            log::debug!("doing initial clickpack reload for clickpackdb");
             let _ = self
                 .reload_clickpacks()
                 .map_err(|e| log::error!("failed to reload clickpacks for clickpackdb: {e}"));

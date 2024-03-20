@@ -352,19 +352,14 @@ impl PlayerClicks {
     }
 
     pub fn num_sounds(&self) -> usize {
-        [
-            &self.hardclicks,
-            &self.hardreleases,
-            &self.clicks,
-            &self.releases,
-            &self.softclicks,
-            &self.softreleases,
-            &self.microclicks,
-            &self.microreleases,
-        ]
-        .iter()
-        .map(|c| c.len())
-        .sum()
+        self.hardclicks.len()
+            + self.hardreleases.len()
+            + self.clicks.len()
+            + self.releases.len()
+            + self.softclicks.len()
+            + self.softreleases.len()
+            + self.microclicks.len()
+            + self.microreleases.len()
     }
 
     pub fn random_click(&self, click_type: ClickType) -> Option<&SoundWrapper> {
