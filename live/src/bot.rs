@@ -338,7 +338,7 @@ pub struct Bot {
     pub prev_spam_offset: f64,
     pub buffer_size_changed: bool,
     pub noise_sound: Option<SoundHandle>,
-    pub clickpacks: Vec<PathBuf>,
+    pub clickpacks: Vec<String>,
     pub last_clickpack_reload: Instant,
     // pub system: *mut FMOD_SYSTEM,
     // pub channel: *mut FMOD_CHANNEL,
@@ -354,6 +354,7 @@ pub struct Bot {
     pub level_start: Instant,
     pub clickpack_db: ClickpackDb,
     pub clickpack_db_open: bool,
+    pub did_clickpack_db_mark: bool,
 }
 
 impl Default for Bot {
@@ -392,6 +393,7 @@ impl Default for Bot {
             level_start: now,
             clickpack_db: ClickpackDb::default(),
             clickpack_db_open: false,
+            did_clickpack_db_mark: false,
         }
     }
 }
@@ -649,10 +651,10 @@ impl Bot {
             match clickpack_env {
                 ClickpackEnv::Name(name) => {
                     let mut found = false;
-                    for path in &self.clickpacks {
-                        if path.file_name().unwrap().to_str().unwrap() == name {
+                    for dirname in &self.clickpacks {
+                        if dirname == name {
                             prev_join_handle = Some(preload_clickpack(
-                                path.clone(),
+                                PathBuf::from(".zcb").join("clickpacks").join(dirname),
                                 self.toast_queue.clone(),
                                 prev_join_handle,
                                 *load_for,
@@ -865,12 +867,20 @@ impl Bot {
         let path = Path::new(".zcb/clickpacks");
         std::fs::create_dir_all(path)?;
         let dir = path.read_dir()?;
-        self.clickpacks.clear();
+        let prev_clickpacks = std::mem::take(&mut self.clickpacks);
         for entry in dir {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                self.clickpacks.push(path);
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                self.clickpack_db.mark_downloaded(&name, path, true);
+                self.clickpacks.push(name);
+            }
+        }
+        for prev in &prev_clickpacks {
+            if !self.clickpacks.contains(prev) {
+                self.clickpack_db
+                    .mark_downloaded(prev, path.to_path_buf(), false);
             }
         }
         Ok(())
@@ -946,20 +956,10 @@ impl Bot {
         }
 
         // clickpack reloading
-        if self.last_clickpack_reload.elapsed() > Duration::from_secs(3) {
+        if self.last_clickpack_reload.elapsed() > Duration::from_secs(5) {
             let _ = self
                 .reload_clickpacks()
                 .map_err(|e| log::error!("failed to reload clickpacks: {e}"));
-            // if !self.clickpack.name.is_empty()
-            //     && !self.env.is_selected_by_path()
-            //     && !self.clickpacks.contains(&self.clickpack.path)
-            // {
-            //     log::info!(
-            //         "selected clickpack {:?} not found after reload, unloading",
-            //         self.clickpack.path
-            //     );
-            //     self.unload_clickpack();
-            // }
             self.last_clickpack_reload = Instant::now();
         }
 
@@ -1583,16 +1583,15 @@ impl Bot {
         egui::ComboBox::from_label("Select clickpack")
             .selected_text(ellipsis)
             .show_ui(ui, |ui| {
-                for path in &self.clickpacks {
-                    let dirname = path.file_name().unwrap().to_str().unwrap();
+                for dirname in &self.clickpacks {
                     let is_loading_clickpack = self.is_loading_clickpack.clone();
                     let load_for = self.conf.load_clickpack_for;
+                    let path = PathBuf::from(".zcb").join("clickpacks").join(dirname);
                     if ui
-                        .selectable_label(self.clickpack.name == dirname, dirname)
+                        .selectable_label(&self.clickpack.name == dirname, dirname)
                         .clicked()
                     {
                         let modal_moved = modal.clone();
-                        let path = path.clone();
                         let dirname_moved = dirname.to_string();
                         std::thread::spawn(move || {
                             Self::load_clickpack_thread(
@@ -1822,6 +1821,12 @@ impl Bot {
         if !self.clickpack_db_open {
             return;
         }
+        if !self.did_clickpack_db_mark && self.clickpack_db.db.read().unwrap().entries.len() != 0 {
+            let _ = self
+                .reload_clickpacks()
+                .map_err(|e| log::error!("failed to reload clickpacks for clickpackdb: {e}"));
+            self.did_clickpack_db_mark = true;
+        }
         egui::Window::new("ClickpackDB")
             .open(&mut self.clickpack_db_open)
             .show(ctx, |ui| {
@@ -1829,8 +1834,8 @@ impl Bot {
                 if let Some(select_path) =
                     std::mem::replace(&mut self.clickpack_db.select_clickpack, None)
                 {
+                    self.conf.load_clickpack_for = LoadClickpackFor::All;
                     let is_loading_clickpack = self.is_loading_clickpack.clone();
-                    let load_for = self.conf.load_clickpack_for;
                     let modal_moved = modal.clone();
                     std::thread::spawn(move || {
                         Self::load_clickpack_thread(
@@ -1843,7 +1848,7 @@ impl Bot {
                             },
                             &select_path,
                             is_loading_clickpack,
-                            load_for,
+                            LoadClickpackFor::All,
                         );
                         unsafe {
                             BOT.env.update(
@@ -1854,7 +1859,7 @@ impl Bot {
                                         .to_string_lossy()
                                         .to_string(),
                                 ),
-                                load_for,
+                                LoadClickpackFor::All,
                             )
                         };
                     });

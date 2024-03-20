@@ -43,7 +43,7 @@ windows = { version = "0.54.0", features = ["Win32_System_Threading",
                                             "Win32_System_Memory",
                                             "Win32_System_Diagnostics_Debug"] }
 fastrand = "2.0.1"
-egui_clickpack_db = { git = "https://github.com/zeozeozeo/zcb3.git", features = ["live"] }
+egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git", features = ["live"] }
 ureq = "2.9.6"
 # gfmod = { path = "gfmod" }
 
