@@ -22,12 +22,20 @@ pub mod play_layer {
 
     retour::static_detour! {
         pub static RESET_LEVEL_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer);
+        pub static DESTROY_PLAYER_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer, usize, usize, usize);
     }
 
     pub fn reset_level(this: PlayLayer) {
         unsafe {
             BOT.on_reset();
             RESET_LEVEL_ORIGINAL.call(this);
+        }
+    }
+
+    pub fn destroy_player(this: PlayLayer, _edx: usize, player: usize, hit: usize) {
+        unsafe {
+            BOT.on_death();
+            DESTROY_PLAYER_ORIGINAL.call(this, 0, player, hit);
         }
     }
 }
@@ -127,6 +135,7 @@ pub unsafe fn init_hooks() -> Result<()> {
     {
         use play_layer::*;
         hook!(RESET_LEVEL_ORIGINAL -> reset_level @ *BASE + 0x2ea130);
+        hook!(DESTROY_PLAYER_ORIGINAL -> destroy_player @ *BASE + 0x2e6730);
     }
     {
         use player_object::*;
@@ -146,6 +155,7 @@ pub unsafe fn disable_hooks() -> Result<()> {
     {
         use play_layer::*;
         RESET_LEVEL_ORIGINAL.disable()?;
+        DESTROY_PLAYER_ORIGINAL.disable()?;
     }
     {
         use player_object::*;

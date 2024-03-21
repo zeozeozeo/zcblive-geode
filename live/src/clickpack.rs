@@ -126,6 +126,7 @@ impl ClickType {
             Self::MicroRelease
         }
     }
+    
     pub fn preferred(self) -> [Self; 8] {
         use ClickType::*;
 
@@ -232,6 +233,11 @@ impl ClickType {
                 | ClickType::SoftRelease
                 | ClickType::MicroRelease
         )
+    }
+
+    #[inline]
+    pub const fn is_click(self) -> bool {
+        !self.is_release()
     }
 }
 

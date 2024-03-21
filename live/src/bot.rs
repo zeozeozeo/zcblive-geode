@@ -128,7 +128,7 @@ impl Env {
             LoadClickpackFor::All => self.clickpack_ord = vec![(clickpack_env, load_for)],
             _ => {
                 self.clickpack_ord.retain(|ord| ord.1 != load_for);
-                log::info!("pushing to ord: ({:?}, {:?})", clickpack_env, load_for);
+                log::info!("pushing to ord: ({clickpack_env:?}, {load_for:?})");
                 self.clickpack_ord.push((clickpack_env, load_for));
             }
         }
@@ -208,6 +208,8 @@ pub struct Config {
     pub decouple_platformer: bool,
     #[serde(default = "true_value")]
     pub autosave_config: bool,
+    #[serde(default = "true_value")]
+    pub release_buttons_on_death: bool,
 }
 
 impl Config {
@@ -247,6 +249,7 @@ impl Default for Config {
             load_clickpack_for: LoadClickpackFor::All,
             decouple_platformer: false,
             autosave_config: true,
+            release_buttons_on_death: true,
         }
     }
 }
@@ -289,26 +292,32 @@ impl Config {
     }
 }
 
+#[derive(Default, Clone, Copy)]
+struct ClickTime {
+    time: f64,
+    typ: ClickType,
+}
+
 #[derive(Default)]
 pub struct ClickTimes {
-    jump: [f64; 2],  // 2 players
-    left: [f64; 2],  // 2 players
-    right: [f64; 2], // 2 players
+    jump: [ClickTime; 2],  // 2 players
+    left: [ClickTime; 2],  // 2 players
+    right: [ClickTime; 2], // 2 players
 }
 
 impl ClickTimes {
-    fn set_time(&mut self, button: Button, player2: bool, time: f64, decouple: bool) {
+    fn set_time(&mut self, button: Button, player2: bool, t: ClickTime, decouple: bool) {
         match button {
-            Button::Jump => self.jump[player2 as usize] = time,
-            Button::Left => self.left[player2 as usize] = time,
+            Button::Jump => self.jump[player2 as usize] = t,
+            Button::Left => self.left[player2 as usize] = t,
             Button::Right => {
                 // TODO:
                 // WTF:  `(if decouple { self.right } else { self.left })[player2 as usize] = time``
                 //       causes a Rust miscompilation if `decouple` is false???
                 if decouple {
-                    self.right[player2 as usize] = time
+                    self.right[player2 as usize] = t;
                 } else {
-                    self.left[player2 as usize] = time
+                    self.left[player2 as usize] = t;
                 }
             }
         }
@@ -316,9 +325,15 @@ impl ClickTimes {
 
     fn get_prev_time(&self, button: Button, player2: bool, decouple: bool) -> f64 {
         match button {
-            Button::Jump => self.jump[player2 as usize],
-            Button::Left => self.left[player2 as usize],
-            Button::Right => (if decouple { self.right } else { self.left })[player2 as usize],
+            Button::Jump => self.jump[player2 as usize].time,
+            Button::Left => self.left[player2 as usize].time,
+            Button::Right => {
+                if decouple {
+                    self.right[player2 as usize].time
+                } else {
+                    self.left[player2 as usize].time
+                }
+            }
         }
     }
 }
@@ -332,7 +347,6 @@ pub struct Bot {
     pub playlayer: PlayLayer,
     pub prev_times: ClickTimes,
     pub is_loading_clickpack: Arc<AtomicBool>,
-    pub prev_click_type: ClickType,
     pub prev_pitch: f64,
     pub prev_volume: f64,
     pub prev_spam_offset: f64,
@@ -370,7 +384,6 @@ impl Default for Bot {
             playlayer: PlayLayer::NULL,
             prev_times: ClickTimes::default(),
             is_loading_clickpack: Arc::new(AtomicBool::new(false)),
-            prev_click_type: ClickType::None,
             prev_pitch: f64::NAN,
             prev_volume: f64::NAN,
             prev_spam_offset: f64::NAN,
@@ -698,7 +711,6 @@ impl Bot {
         }
 
         self.prev_times = ClickTimes::default();
-        self.prev_click_type = ClickType::None;
         self.prev_pitch = 0.0;
         self.prev_volume = self.conf.volume_settings.global_volume;
         self.prev_spam_offset = 0.0;
@@ -713,6 +725,24 @@ impl Bot {
     pub fn on_exit(&mut self) {
         self.on_init(0);
         self.is_in_level = false;
+    }
+
+    pub unsafe fn on_death(&mut self) {
+        // release all buttons that are still pressed
+        if !self.conf.release_buttons_on_death {
+            return;
+        }
+        for (button, t) in [
+            (Button::Jump, self.prev_times.jump),
+            (Button::Left, self.prev_times.left),
+            (Button::Right, self.prev_times.right),
+        ] {
+            for (player, time) in t.iter().enumerate() {
+                if time.typ.is_click() {
+                    self.on_action(button, player == 1, false);
+                }
+            }
+        }
     }
 
     pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {
@@ -827,9 +857,15 @@ impl Bot {
             */
         }
         */
-        self.prev_times
-            .set_time(button, player2, now, self.conf.decouple_platformer);
-        self.prev_click_type = click_type;
+        self.prev_times.set_time(
+            button,
+            player2,
+            ClickTime {
+                time: now,
+                typ: click_type,
+            },
+            self.conf.decouple_platformer,
+        );
         self.prev_pitch = pitch;
     }
 
@@ -1288,17 +1324,6 @@ impl Bot {
             },
         );
 
-        help_text(
-            ui,
-            "Plays platformer left/right sounds even if your clickpack doesn't have them",
-            |ui| {
-                ui.checkbox(
-                    &mut self.conf.force_playing_platformer,
-                    "Force playing platformer sounds",
-                );
-            },
-        );
-
         /*
         help_text(
             ui,
@@ -1324,6 +1349,16 @@ impl Bot {
 
             help_text(
                 ui,
+                "Plays platformer left/right sounds even if your clickpack doesn't have them",
+                |ui| {
+                    ui.checkbox(
+                        &mut self.conf.force_playing_platformer,
+                        "Force playing platformer sounds",
+                    );
+                },
+            );
+            help_text(
+                ui,
                 "Makes both platformer sounds have separate timings. Usually sounds bad",
                 |ui| {
                     ui.checkbox(
@@ -1332,6 +1367,12 @@ impl Bot {
                     );
                 },
             );
+            help_text(ui, "Releases all held buttons on death", |ui| {
+                ui.checkbox(
+                    &mut self.conf.release_buttons_on_death,
+                    "Release buttons on death",
+                );
+            });
 
             drag_value(
                 ui,
@@ -1628,7 +1669,7 @@ impl Bot {
                     let Some(dir) = FileDialog::new().pick_folder() else {
                         return;
                     };
-                    log::debug!("selected clickpack {:?}", dir);
+                    log::debug!("selected clickpack {dir:?}");
                     Self::load_clickpack_thread(
                         |e| {
                             show_error_dialog(
@@ -1678,7 +1719,7 @@ impl Bot {
                                 ui.selectable_value(
                                     &mut self.conf.load_clickpack_for,
                                     load_for,
-                                    format!("{:?}", load_for),
+                                    format!("{load_for:?}"),
                                 );
                             }
                         });
@@ -1781,9 +1822,10 @@ impl Bot {
 
         if !is_loading_clickpack && self.is_in_level {
             ui.collapsing("Debug", |ui| {
-                ui.label("Last click times:");
+                ui.label("Last click times and types:");
                 egui::Grid::new("times_grid")
                     .num_columns(2)
+                    .min_col_width(130.0)
                     .striped(true)
                     .show(ui, |ui| {
                         for times in [
@@ -1792,12 +1834,11 @@ impl Bot {
                             self.prev_times.right,
                         ] {
                             for t in times {
-                                ui.label(format!("{:.3?}", t));
+                                ui.label(format!("{:.3?} | {:?}", t.time, t.typ));
                             }
                             ui.end_row();
                         }
                     });
-                ui.label(format!("Last click type: {:?}", self.prev_click_type));
                 ui.label(format!(
                     "Last pitch: {:.4} ({}..={})",
                     self.prev_pitch, self.conf.pitch.from, self.conf.pitch.to

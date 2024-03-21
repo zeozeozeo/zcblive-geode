@@ -199,6 +199,7 @@ unsafe extern "C" fn zcblive_on_action(button: u8, player2: bool, push: bool) {
     BOT.on_action(Button::from_u8(button), player2, push);
 }
 
+/// optional implementation
 #[no_mangle]
 unsafe extern "C" fn zcblive_on_reset() {
     BOT.on_reset();
@@ -209,6 +210,7 @@ unsafe extern "C" fn zcblive_set_is_in_level(is_in_level: bool) {
     BOT.is_in_level = is_in_level;
 }
 
+/// optional implementation
 #[no_mangle]
 unsafe extern "C" fn zcblive_set_playlayer_time(playlayer_time: f64) {
     BOT.playlayer_time = playlayer_time;
@@ -217,11 +219,17 @@ unsafe extern "C" fn zcblive_set_playlayer_time(playlayer_time: f64) {
 /// can pass NULL to `playlayer`
 #[no_mangle]
 unsafe extern "C" fn zcblive_on_init(playlayer: usize) {
-    BOT.on_init(playlayer)
+    BOT.on_init(playlayer);
 }
 
-/// equivalent to passing NULL to `zcblive_on_init`
+/// equivalent to passing NULL to `zcblive_on_init`. optional implementation
 #[no_mangle]
 unsafe extern "C" fn zcblive_on_quit() {
-    BOT.on_exit()
+    BOT.on_exit();
+}
+
+/// optional implementation
+#[no_mangle]
+unsafe extern "C" fn zcblive_on_death() {
+    BOT.on_death();
 }

@@ -48,6 +48,7 @@ void zcblive_set_is_in_level(bool is_in_level);
 void zcblive_set_playlayer_time(double time);
 void zcblive_on_init(PlayLayer* playlayer);
 void zcblive_on_quit();
+void zcblive_on_death();
 }
 
 // clang-format off
@@ -114,6 +115,11 @@ class $modify(PlayLayer) {
 	void resetLevel() {
 		zcblive_on_reset();
 		PlayLayer::resetLevel();
+	}
+
+	void destroyPlayer(PlayerObject* player, GameObject* hit) {
+		zcblive_on_death();
+		PlayLayer::destroyPlayer(player, hit);
 	}
 };
 
