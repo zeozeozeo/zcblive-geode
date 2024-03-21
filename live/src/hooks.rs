@@ -46,9 +46,10 @@ pub mod player_object {
 
     unsafe fn handle_push_or_release_button(this: PlayerObject, button: i32, push: bool) {
         if BOT.conf.use_alternate_hook {
-            let playlayer = GameManager::shared().play_layer();
+            let game_manager = GameManager::shared();
+            let playlayer = game_manager.play_layer();
             BOT.playlayer = playlayer;
-            if playlayer.is_null() {
+            if playlayer.is_null() && game_manager.level_editor_layer().is_null() {
                 return;
             }
             let b = Button::from_u8(button.try_into().unwrap());
@@ -56,7 +57,7 @@ pub mod player_object {
                 return;
             }
 
-            let player1 = this == playlayer.player1();
+            let player1 = !playlayer.is_null() && this == playlayer.player1();
             BOT.on_action(b, !player1, push);
         }
     }

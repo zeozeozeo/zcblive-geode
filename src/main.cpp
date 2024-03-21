@@ -1,5 +1,6 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/LevelEditorLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 
 using namespace geode::prelude;
@@ -8,6 +9,8 @@ using namespace geode::prelude;
 // (i have no idea from why rust wants this much)
 // note that there are a lot of duplicates here, Rust says that this is required
 #pragma comment(lib, "kernel32.lib")
+#pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "legacy_stdio_definitions.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "cfgmgr32.lib")
@@ -67,13 +70,12 @@ inline double getTime() {
 
 // clang-format off
 class $modify(GJBaseGameLayer) {
-	// i love hooking dtors :D
-	void destructor() {
-		zcblive_on_quit();
-		GJBaseGameLayer::~GJBaseGameLayer();
-	}
-
 	void handleButton(bool push, int button, bool player1) {
+		// if (PlayLayer::get() == nullptr && LevelEditorLayer::get() == nullptr) {
+		// 	zcblive_set_is_in_level(false);
+		// 	GJBaseGameLayer::handleButton(push, button, player1);
+		// 	return;
+		// }
 		zcblive_set_is_in_level(true);
 		zcblive_set_playlayer_time(getTime());
 
@@ -104,9 +106,21 @@ class $modify(GJBaseGameLayer) {
 };
 
 class $modify(PlayLayer) {
+	void onQuit() {
+		zcblive_on_quit();
+		PlayLayer::onQuit();
+	}
+
 	void resetLevel() {
 		zcblive_on_reset();
 		PlayLayer::resetLevel();
+	}
+};
+
+class $modify(LevelEditorLayer) {
+	bool init(GJGameLevel* level, bool something) {
+		zcblive_on_init(nullptr);
+		return LevelEditorLayer::init(level, something);
 	}
 };
 // clang-format on

@@ -354,7 +354,6 @@ pub struct Bot {
     pub level_start: Instant,
     pub clickpack_db: ClickpackDb,
     pub clickpack_db_open: bool,
-    pub did_clickpack_db_mark: bool,
 }
 
 impl Default for Bot {
@@ -393,7 +392,6 @@ impl Default for Bot {
             level_start: now,
             clickpack_db: ClickpackDb::default(),
             clickpack_db_open: false,
-            did_clickpack_db_mark: false,
         }
     }
 }
@@ -1829,17 +1827,11 @@ impl Bot {
         if !self.clickpack_db_open {
             return;
         }
-        if !self.did_clickpack_db_mark
-            && matches!(
-                *self.clickpack_db.status.read().unwrap(),
-                egui_clickpack_db::Status::Loaded { .. }
-            )
-        {
-            log::debug!("doing initial clickpack reload for clickpackdb");
+        if std::mem::take(&mut self.clickpack_db.has_refreshed) {
+            log::debug!("doing clickpack reload for clickpackdb");
             let _ = self
                 .reload_clickpacks()
                 .map_err(|e| log::error!("failed to reload clickpacks for clickpackdb: {e}"));
-            self.did_clickpack_db_mark = true;
         }
         egui::Window::new("ClickpackDB")
             .open(&mut self.clickpack_db_open)

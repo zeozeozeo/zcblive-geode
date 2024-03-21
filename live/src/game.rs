@@ -15,10 +15,6 @@ macro_rules! impl_default {
     };
 }
 
-const fn read_mem<T>(address: usize) -> *mut T {
-    address as _
-}
-
 #[macro_export]
 macro_rules! impl_get_set {
     ($varname:ident, $set_varname:ident, $typ:ty, $addr:expr) => {
@@ -75,6 +71,16 @@ impl PlayLayer {
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[repr(transparent)]
+pub struct LevelEditorLayer {
+    pub addr: usize,
+}
+
+impl LevelEditorLayer {
+    impl_default!();
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[repr(transparent)]
 pub struct GameManager {
     pub addr: usize,
 }
@@ -93,6 +99,12 @@ impl GameManager {
     }
 
     impl_get_set!(play_layer, set_play_layer, PlayLayer, 0x198);
+    impl_get_set!(
+        level_editor_layer,
+        set_level_editor_layer,
+        LevelEditorLayer,
+        0x19c
+    );
     // impl_get_set!(player1, set_player1, PlayerObject, 0x878);
     // impl_get_set!(player2, set_player2, PlayerObject, 0x87c);
 }
