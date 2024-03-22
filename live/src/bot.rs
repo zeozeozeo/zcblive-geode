@@ -990,6 +990,7 @@ impl Bot {
                     "This seems to be your first time using ZCB Live.\n\
                     • Press 1 to open the menu\n\
                     • Press 2 to toggle the clickbot\n\
+                    • Explore ClickpackDB to download new clickpacks\n\
                     You can change the hotkeys in the Options section",
                     Icon::Info,
                 );
