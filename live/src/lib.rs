@@ -233,3 +233,8 @@ unsafe extern "C" fn zcblive_on_quit() {
 unsafe extern "C" fn zcblive_on_death() {
     BOT.on_death();
 }
+
+#[no_mangle]
+unsafe extern "C" fn zcblive_do_force_player2_sounds() -> bool {
+    BOT.conf.force_player2_sounds
+}

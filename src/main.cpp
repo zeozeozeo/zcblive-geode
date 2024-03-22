@@ -49,6 +49,7 @@ void zcblive_set_playlayer_time(double time);
 void zcblive_on_init(PlayLayer* playlayer);
 void zcblive_on_quit();
 void zcblive_on_death();
+bool zcblive_do_force_player2_sounds();
 }
 
 // clang-format off
@@ -87,7 +88,8 @@ class $modify(GJBaseGameLayer) {
 		if (!is_invalid) {
 			zcblive_on_action(
 				button,
-				!player1 && playLayer && playLayer->m_levelSettings->m_twoPlayerMode,
+				!player1 && playLayer && (playLayer->m_levelSettings->m_twoPlayerMode
+										  	|| zcblive_do_force_player2_sounds()),
 				push
 			);
 		}

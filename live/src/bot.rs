@@ -210,6 +210,10 @@ pub struct Config {
     pub autosave_config: bool,
     #[serde(default = "true_value")]
     pub release_buttons_on_death: bool,
+    #[serde(default = "bool::default")]
+    pub force_player2_sounds: bool,
+    #[serde(default = "bool::default")]
+    pub play_noise_when_disabled: bool,
 }
 
 impl Config {
@@ -250,6 +254,8 @@ impl Default for Config {
             decouple_platformer: false,
             autosave_config: true,
             release_buttons_on_death: true,
+            force_player2_sounds: false,
+            play_noise_when_disabled: false,
         }
     }
 }
@@ -323,15 +329,15 @@ impl ClickTimes {
         }
     }
 
-    fn get_prev_time(&self, button: Button, player2: bool, decouple: bool) -> f64 {
+    fn get_prev_time(&self, button: Button, player2: bool, decouple: bool) -> ClickTime {
         match button {
-            Button::Jump => self.jump[player2 as usize].time,
-            Button::Left => self.left[player2 as usize].time,
+            Button::Jump => self.jump[player2 as usize],
+            Button::Left => self.left[player2 as usize],
             Button::Right => {
                 if decouple {
-                    self.right[player2 as usize].time
+                    self.right[player2 as usize]
                 } else {
-                    self.left[player2 as usize].time
+                    self.left[player2 as usize]
                 }
             }
         }
@@ -693,6 +699,13 @@ impl Bot {
                 ClickpackEnv::None => log::info!("env.json doesn't specify a clickpack"),
             }
         }
+        if let Some(handle) = prev_join_handle {
+            std::thread::spawn(|| {
+                handle.join().unwrap();
+                log::info!("all clickpacks preloaded, playing noise (if any)");
+                unsafe { BOT.play_noise() };
+            });
+        }
     }
 
     fn get_pitch(&self) -> f64 {
@@ -720,6 +733,17 @@ impl Bot {
 
     pub fn on_reset(&mut self) {
         self.level_start = Instant::now();
+        //for dir in [
+        //    &mut self.prev_times.jump,
+        //    &mut self.prev_times.left,
+        //    &mut self.prev_times.right,
+        //] {
+        //    for t in dir {
+        //        t.time = 0.0;
+        //        t.typ = ClickType::None;
+        //    }
+        //}
+        self.prev_times = ClickTimes::default();
     }
 
     pub fn on_exit(&mut self) {
@@ -738,23 +762,23 @@ impl Bot {
             (Button::Right, self.prev_times.right),
         ] {
             for (player, time) in t.iter().enumerate() {
-                if time.typ.is_click() {
+                if time.typ.is_click() && time.time != 0.0 {
                     self.on_action(button, player == 1, false);
                 }
             }
         }
     }
 
-    pub unsafe fn on_action(&mut self, button: Button, player2: bool, push: bool) {
+    pub unsafe fn on_action(&mut self, button: Button, mut player2: bool, push: bool) {
         if self.clickpack.num_sounds == 0 || !self.is_in_level || !self.conf.enabled {
             return;
         }
         #[cfg(not(feature = "geode"))]
-        if !self.playlayer.is_null()
-            && (self.playlayer.is_paused()
-                || self.time() == 0.0
-                || (player2 && !self.playlayer.level_settings().is_2player()))
-        {
+        if player2 && !self.playlayer.is_null() && !self.playlayer.level_settings().is_2player() {
+            player2 = self.conf.force_player2_sounds;
+        }
+        #[cfg(not(feature = "geode"))]
+        if !self.playlayer.is_null() && (self.playlayer.is_paused() || self.time() == 0.0) {
             return;
         }
         if button.is_platformer()
@@ -768,7 +792,10 @@ impl Bot {
         let prev_time =
             self.prev_times
                 .get_prev_time(button, player2, self.conf.decouple_platformer);
-        let dt = (now - prev_time).abs();
+        if prev_time.typ.is_click() && push {
+            return;
+        }
+        let dt = (now - prev_time.time).abs();
         let click_type = ClickType::from_time(push, dt, &self.conf.timings);
         let use_fmod = self.conf.use_fmod;
 
@@ -1005,6 +1032,7 @@ impl Bot {
 
         if toggle_bot {
             self.open_clickbot_toggle_toast(&mut toasts);
+            self.play_noise();
         }
         if toggle_noise {
             self.open_noise_toggle_toast(&mut toasts);
@@ -1036,6 +1064,7 @@ impl Bot {
                             .changed()
                         {
                             self.open_clickbot_toggle_toast(&mut toasts);
+                            self.play_noise();
                         }
 
                         // ui.separator();
@@ -1264,16 +1293,12 @@ impl Bot {
         stop_kittyaudio_noise(&mut self.noise_sound);
         // stop_fmod_noise(&mut self.fmod_noise_sound);
 
-        if self.conf.use_fmod {
-            // if self.conf.play_noise {
-            //     start_fmod_noise(&mut self.fmod_noise_sound);
-            // } else {
-            //     stop_fmod_noise(&mut self.fmod_noise_sound);
-            // }
-        } else if self.conf.play_noise {
-            start_kittyaudio_noise(&mut self.noise_sound);
-        } else {
-            stop_kittyaudio_noise(&mut self.noise_sound);
+        if self.conf.play_noise && (self.conf.enabled || self.conf.play_noise_when_disabled) {
+            if self.conf.use_fmod {
+                // start_fmod_noise(&mut self.fmod_noise_sound);
+            } else {
+                start_kittyaudio_noise(&mut self.noise_sound);
+            }
         }
     }
 
@@ -1354,6 +1379,17 @@ impl Bot {
                     ui.checkbox(
                         &mut self.conf.force_playing_platformer,
                         "Force playing platformer sounds",
+                    );
+                },
+            );
+            help_text(
+                ui,
+                "Plays player 2 sounds outside 2-player levels.\n\
+                This will not have any effect if you use alternate hook!",
+                |ui| {
+                    ui.checkbox(
+                        &mut self.conf.force_player2_sounds,
+                        "Force playing player 2 sounds",
                     );
                 },
             );
@@ -1530,6 +1566,13 @@ impl Bot {
         ui.collapsing("Advanced", |ui| {
             // let last_bufsize = self.mixer.renderer.guard().last_buffer_size;
             // ui.label(format!("Real buffer size: {last_bufsize}"));
+            help_text(
+                ui,
+                "Keep playing noise even if the clickbot is disabled",
+                |ui| {
+                    ui.checkbox(&mut self.conf.play_noise_when_disabled, "Play noise when disabled");
+                },
+            );
 
             let prev_bufsize = self.conf.buffer_size;
             help_text(
@@ -1592,6 +1635,14 @@ impl Bot {
 
     fn unload_clickpack(&mut self) {
         self.clickpack = Clickpack::default();
+        self.stop_noise();
+    }
+
+    fn stop_noise(&mut self) {
+        let prev_play_noise = self.conf.play_noise;
+        self.conf.play_noise = false;
+        self.play_noise();
+        self.conf.play_noise = prev_play_noise;
     }
 
     fn load_clickpack_thread(
@@ -1604,11 +1655,14 @@ impl Bot {
             is_loading_clickpack.store(true, Ordering::Relaxed);
             if load_for == LoadClickpackFor::All {
                 BOT.unload_clickpack();
+            } else {
+                BOT.stop_noise();
             }
             let _ = BOT.clickpack.load_from_path(dir, load_for).map_err(|e| {
                 log::error!("failed to load clickpack: {e}");
                 err_fn(e);
             });
+            BOT.play_noise();
             is_loading_clickpack.store(false, Ordering::Relaxed);
         }
     }

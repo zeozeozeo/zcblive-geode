@@ -126,7 +126,7 @@ impl ClickType {
             Self::MicroRelease
         }
     }
-    
+
     pub fn preferred(self) -> [Self; 8] {
         use ClickType::*;
 
@@ -237,7 +237,10 @@ impl ClickType {
 
     #[inline]
     pub const fn is_click(self) -> bool {
-        !self.is_release()
+        matches!(
+            self,
+            ClickType::HardClick | ClickType::Click | ClickType::SoftClick | ClickType::MicroClick
+        )
     }
 }
 
@@ -527,6 +530,10 @@ impl Clickpack {
             .unwrap()
             .to_string_lossy()
             .to_string();
+
+        if load_for != LoadClickpackFor::All {
+            self.noise = None;
+        }
 
         // this is probably the most confusing code i've ever written
         let mut has_cleared = false;
