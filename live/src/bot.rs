@@ -164,6 +164,55 @@ pub enum Stage {
     Options,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
+struct IgnoredClickTypes {
+    hardclicks: bool,
+    hardreleases: bool,
+    softclicks: bool,
+    softreleases: bool,
+    clicks: bool,
+    releases: bool,
+    microclicks: bool,
+    microreleases: bool,
+}
+
+impl IgnoredClickTypes {
+    #[inline]
+    const fn is_ignored(&self, typ: ClickType) -> bool {
+        match typ {
+            ClickType::HardClick => self.hardclicks,
+            ClickType::HardRelease => self.hardreleases,
+            ClickType::SoftClick => self.softclicks,
+            ClickType::SoftRelease => self.softreleases,
+            ClickType::Click => self.clicks,
+            ClickType::Release => self.releases,
+            ClickType::MicroClick => self.microclicks,
+            ClickType::MicroRelease => self.microreleases,
+            ClickType::None => true,
+        }
+    }
+
+    #[inline]
+    const fn any_ignored(&self) -> bool {
+        self.hardclicks
+            || self.hardreleases
+            || self.softclicks
+            || self.softreleases
+            || self.clicks
+            || self.releases
+            || self.microclicks
+            || self.microreleases
+    }
+}
+
+const fn death_release_delay_default() -> f64 {
+    0.001
+}
+
+const fn death_release_delay_offset_default() -> f64 {
+    0.13
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct Config {
     pub pitch_enabled: bool,
@@ -210,10 +259,18 @@ pub struct Config {
     pub autosave_config: bool,
     #[serde(default = "true_value")]
     pub release_buttons_on_death: bool,
+    #[serde(default = "death_release_delay_default")]
+    pub death_release_delay: f64,
+    #[serde(default = "death_release_delay_offset_default")]
+    pub death_release_delay_offset: f64,
+    #[serde(default = "bool::default")]
+    pub death_release_delay_neg: bool,
     #[serde(default = "bool::default")]
     pub force_player2_sounds: bool,
     #[serde(default = "bool::default")]
     pub play_noise_when_disabled: bool,
+    #[serde(default = "IgnoredClickTypes::default")]
+    ignored_click_types: IgnoredClickTypes,
 }
 
 impl Config {
@@ -254,8 +311,12 @@ impl Default for Config {
             decouple_platformer: false,
             autosave_config: true,
             release_buttons_on_death: true,
+            death_release_delay: death_release_delay_default(),
+            death_release_delay_offset: death_release_delay_offset_default(),
+            death_release_delay_neg: false,
             force_player2_sounds: false,
             play_noise_when_disabled: false,
+            ignored_click_types: IgnoredClickTypes::default(),
         }
     }
 }
@@ -751,11 +812,7 @@ impl Bot {
         self.is_in_level = false;
     }
 
-    pub unsafe fn on_death(&mut self) {
-        // release all buttons that are still pressed
-        if !self.conf.release_buttons_on_death {
-            return;
-        }
+    unsafe fn release_buttons(&mut self) {
         for (button, t) in [
             (Button::Jump, self.prev_times.jump),
             (Button::Left, self.prev_times.left),
@@ -766,6 +823,34 @@ impl Bot {
                     self.on_action(button, player == 1, false);
                 }
             }
+        }
+    }
+
+    pub unsafe fn on_death(&mut self) {
+        // release all buttons that are still pressed
+        if !self.conf.release_buttons_on_death {
+            return;
+        }
+        let mut release_delay = self.conf.death_release_delay;
+        let offset = self.conf.death_release_delay_offset;
+        if release_delay == 0.0 && offset == 0.0 {
+            self.release_buttons();
+        } else {
+            if offset != 0.0 {
+                if self.conf.death_release_delay_neg {
+                    release_delay += utils::f64_range(-offset..=offset);
+                } else {
+                    release_delay += utils::f64_range(0.0..=offset);
+                }
+            }
+            if release_delay <= 0.0 {
+                self.release_buttons();
+                return;
+            }
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs_f64(release_delay));
+                BOT.release_buttons();
+            });
         }
     }
 
@@ -797,6 +882,9 @@ impl Bot {
         }
         let dt = (now - prev_time.time).abs();
         let click_type = ClickType::from_time(push, dt, &self.conf.timings);
+        if self.conf.ignored_click_types.is_ignored(click_type) {
+            return;
+        }
         let use_fmod = self.conf.use_fmod;
 
         // get click
@@ -1093,6 +1181,10 @@ impl Bot {
                     .init()
                     .expect("failed to initialize simple_logger");
             });
+        } else {
+            unsafe {
+                let _ = FreeConsole();
+            }
         }
     }
 
@@ -1410,6 +1502,27 @@ impl Bot {
                     "Release buttons on death",
                 );
             });
+            if self.conf.release_buttons_on_death {
+                drag_value(
+                    ui,
+                    &mut self.conf.death_release_delay,
+                    "Release delay (sec)",
+                    0.0..=f64::INFINITY,
+                    "Delay before releasing buttons on death in seconds",
+                );
+                ui.horizontal(|ui| {
+                    drag_value(
+                        ui,
+                        &mut self.conf.death_release_delay_offset,
+                        "+/- (sec)",
+                        0.0..=f64::INFINITY,
+                        "Random offset for the death release delay in seconds",
+                    );
+                    ui.checkbox(&mut self.conf.death_release_delay_neg, "Negative?");
+                });
+            }
+
+            ui.separator();
 
             drag_value(
                 ui,
@@ -1436,6 +1549,25 @@ impl Bot {
                 "Any value smaller than {:.2?} plays microclicks/microreleases",
                 Duration::from_secs_f64(timings.soft),
             ))
+        });
+
+        ui.collapsing("Ignored click types", |ui| {
+            ui.label(
+                "Ignored click types will not be played. This can be useful for \
+                disabling microreleases, for example",
+            );
+            let i = &mut self.conf.ignored_click_types;
+            ui.checkbox(&mut i.hardclicks, "Hardclicks");
+            ui.checkbox(&mut i.hardreleases, "Hardreleases");
+            ui.checkbox(&mut i.clicks, "Clicks");
+            ui.checkbox(&mut i.releases, "Releases");
+            ui.checkbox(&mut i.softclicks, "Softclicks");
+            ui.checkbox(&mut i.softreleases, "Softreleases");
+            ui.checkbox(&mut i.microclicks, "Microclicks");
+            ui.checkbox(&mut i.microreleases, "Microreleases");
+            if i.any_ignored() && ui.button("Reset").clicked() {
+                *i = IgnoredClickTypes::default();
+            }
         });
 
         ui.collapsing("Pitch variation", |ui| {
@@ -1632,6 +1764,9 @@ impl Bot {
     fn apply_config(&mut self) {
         self.maybe_init_kittyaudio();
         self.play_noise();
+
+        #[cfg(not(feature = "geode"))]
+        self.maybe_alloc_console();
     }
 
     fn unload_clickpack(&mut self) {
