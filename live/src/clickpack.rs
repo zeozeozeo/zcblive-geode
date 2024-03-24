@@ -20,7 +20,7 @@ impl Button {
         }
     }
 
-    #[allow(dead_code)]
+    #[inline]
     pub const fn is_platformer(self) -> bool {
         matches!(self, Self::Left | Self::Right)
     }
@@ -68,7 +68,7 @@ pub struct VolumeSettings {
     pub change_releases_volume: bool,
     pub global_volume: f64,
     pub volume_var: f64,
-    pub platformer_volume_offset: f64,
+    pub platformer_volume_factor: f64,
 }
 
 impl Default for VolumeSettings {
@@ -81,7 +81,7 @@ impl Default for VolumeSettings {
             change_releases_volume: false,
             global_volume: 1.0,
             volume_var: 0.2,
-            platformer_volume_offset: 0.0,
+            platformer_volume_factor: 1.0,
         }
     }
 }

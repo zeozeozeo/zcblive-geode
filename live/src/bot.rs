@@ -271,6 +271,8 @@ pub struct Config {
     pub play_noise_when_disabled: bool,
     #[serde(default = "IgnoredClickTypes::default")]
     ignored_click_types: IgnoredClickTypes,
+    #[serde(default = "bool::default")]
+    pub use_ingame_time: bool,
 }
 
 impl Config {
@@ -317,6 +319,7 @@ impl Default for Config {
             force_player2_sounds: false,
             play_noise_when_disabled: false,
             ignored_click_types: IgnoredClickTypes::default(),
+            use_ingame_time: false,
         }
     }
 }
@@ -919,7 +922,7 @@ impl Bot {
             }
 
             if button.is_platformer() {
-                volume += vol.platformer_volume_offset;
+                volume *= vol.platformer_volume_factor;
             }
 
             // multiply by global volume after all of the changes
@@ -987,13 +990,13 @@ impl Bot {
     #[inline]
     fn time(&self) -> f64 {
         #[cfg(feature = "geode")]
-        if self.playlayer_time != 0.0 {
+        if self.playlayer_time != 0.0 && self.conf.use_ingame_time {
             self.playlayer_time
         } else {
             self.level_start.elapsed().as_secs_f64()
         }
         #[cfg(not(feature = "geode"))]
-        if !self.playlayer.is_null() {
+        if !self.playlayer.is_null() && self.conf.use_ingame_time {
             self.playlayer.time()
         } else {
             self.level_start.elapsed().as_secs_f64()
@@ -1465,6 +1468,9 @@ impl Bot {
             let timings_copy = self.conf.timings.clone();
             let timings = &mut self.conf.timings;
 
+            help_text(ui, "Uses in-game level time instead of real time", |ui| {
+                ui.checkbox(&mut self.conf.use_ingame_time, "Use in-game time");
+            });
             help_text(
                 ui,
                 "Plays platformer left/right sounds even if your clickpack doesn't have them",
@@ -1624,10 +1630,11 @@ impl Bot {
             );
             drag_value(
                 ui,
-                &mut vol.platformer_volume_offset,
-                "Platformer volume offset",
+                &mut vol.platformer_volume_factor,
+                "Platformer volume factor",
                 f64::NEG_INFINITY..=f64::INFINITY,
-                "Offsets the volume for platformer sounds. If this value is -0.5, the volume will be 0.5",
+                "Multiplier of the platformer sound volume. If this is 0.5, \
+                platformer sounds will be played at half volume",
             );
         });
 
