@@ -331,7 +331,7 @@ impl PlayerClicks {
             log::debug!("skipping matching file {path:?}");
             return;
         }
-        let filename = path.file_name().unwrap().to_string_lossy();
+        let filename = path.file_name().unwrap().to_string_lossy().to_lowercase();
         let patterns = [
             ("hard", "click", &mut self.hardclicks),
             ("hard", "release", &mut self.hardreleases),
@@ -576,6 +576,37 @@ impl Clickpack {
         }
 
         self.num_sounds = self.num_sounds();
+        log::info!(
+            "amount of sounds in clickpack {clickpack_dir:?}: {}",
+            self.num_sounds
+        );
+        for mode in [
+            ("player1", &self.player1),
+            ("player2", &self.player2),
+            ("left1", &self.left1),
+            ("right1", &self.right1),
+            ("left2", &self.left2),
+            ("right2", &self.right2),
+        ] {
+            log::info!("    {}: {} sounds", mode.0, mode.1.num_sounds());
+            for sounds in [
+                ("hardclicks", &mode.1.hardclicks),
+                ("hardreleases", &mode.1.hardreleases),
+                ("clicks", &mode.1.clicks),
+                ("releases", &mode.1.releases),
+                ("softclicks", &mode.1.softclicks),
+                ("softreleases", &mode.1.softreleases),
+                ("microclicks", &mode.1.microclicks),
+                ("microreleases", &mode.1.microreleases),
+            ] {
+                log::info!(
+                    "        {}: {} sounds{}",
+                    sounds.0,
+                    sounds.1.len(),
+                    if sounds.1.len() != 0 { " <<<<<<<" } else { "" }
+                );
+            }
+        }
         self.has_platformer_sounds = self.left1.num_sounds() != 0
             || self.right1.num_sounds() != 0
             || self.left2.num_sounds() != 0
