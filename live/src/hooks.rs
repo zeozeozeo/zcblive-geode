@@ -11,8 +11,14 @@ pub static BASE: Lazy<usize> = Lazy::new(|| {
 
 macro_rules! hook {
     ($original:ident -> $hook:ident @ $addr:expr) => {
+        let address = $addr;
+        ::log::info!(
+            "hooking {} -> {} @ {address:#x}",
+            stringify!($original),
+            stringify!($hook)
+        );
         $original
-            .initialize(::std::mem::transmute($addr), $hook)?
+            .initialize(::std::mem::transmute(address), $hook)?
             .enable()?;
     };
 }
@@ -148,10 +154,12 @@ pub unsafe fn init_hooks() -> Result<()> {
         hook!(INIT_ORIGINAL -> init @ *BASE + 0x190290);
         hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x1b69f0);
     }
+    log::info!("all hooks initialized!");
     Ok(())
 }
 
 pub unsafe fn disable_hooks() -> Result<()> {
+    log::info!("disabling hooks");
     {
         use play_layer::*;
         RESET_LEVEL_ORIGINAL.disable()?;
@@ -168,5 +176,6 @@ pub unsafe fn disable_hooks() -> Result<()> {
         INIT_ORIGINAL.disable()?;
         HANDLE_BUTTON_ORIGINAL.disable()?;
     }
+    log::info!("all hooks disabled");
     Ok(())
 }

@@ -529,7 +529,7 @@ unsafe fn get_raw_input(state: &mut EguiState) -> Result<RawInput, Error> {
     Ok(RawInput {
         modifiers: state.modifiers.unwrap_or_default(),
         events: std::mem::take(&mut state.events),
-        screen_rect: Some(get_screen_rect()?),
+        screen_rect: Some(get_screen_rect(state.egui_ctx.zoom_factor())?),
         time: Some(get_system_time()),
         max_texture_side: None,
         predicted_dt: 1.0 / 60.0,
@@ -571,14 +571,14 @@ pub fn get_screen_size() -> Result<(u32, u32), Error> {
     ))
 }
 
-fn get_screen_rect() -> Result<Rect, Error> {
+fn get_screen_rect(zoom_factor: f32) -> Result<Rect, Error> {
     let size = get_screen_size()?;
 
     Ok(Rect {
         min: Pos2::ZERO,
         max: Pos2 {
-            x: size.0 as f32,
-            y: size.1 as f32,
+            x: size.0 as f32 / zoom_factor,
+            y: size.1 as f32 / zoom_factor,
         },
     })
 }

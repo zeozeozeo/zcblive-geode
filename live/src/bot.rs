@@ -1238,19 +1238,29 @@ impl Bot {
             );
         });
         ui.collapsing("Configuration", |ui| {
-            let slider =
-                ui.add(egui::Slider::new(&mut self.conf.ui_scale, 0.5..=5.0).text("UI Scale"));
-            if slider.clicked() {
-                self.prev_scale_factor = ctx.zoom_factor();
-            }
-            egui_gl_hook::set_changing_scale(
-                slider.changed()
-                    || slider.clicked()
-                    || slider.dragged()
-                    || slider.drag_released()
-                    || slider.has_focus(),
-                self.prev_scale_factor,
-            );
+            ui.horizontal(|ui| {
+                let slider =
+                    ui.add(egui::Slider::new(&mut self.conf.ui_scale, 0.5..=5.0).text("UI Scale"));
+                if slider.clicked() {
+                    self.prev_scale_factor = ctx.zoom_factor();
+                }
+                egui_gl_hook::set_changing_scale(
+                    slider.changed()
+                        || slider.clicked()
+                        || slider.dragged()
+                        || slider.drag_released()
+                        || slider.has_focus(),
+                    self.prev_scale_factor,
+                );
+                if self.conf.ui_scale != 1.0
+                    && ui
+                        .button("Reset")
+                        .on_hover_text("Reset to 100% scale")
+                        .clicked()
+                {
+                    self.conf.ui_scale = 1.0;
+                }
+            });
             #[cfg(not(feature = "geode"))]
             ui.horizontal(|ui| {
                 help_text(
