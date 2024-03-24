@@ -273,6 +273,8 @@ pub struct Config {
     ignored_click_types: IgnoredClickTypes,
     #[serde(default = "bool::default")]
     pub use_ingame_time: bool,
+    #[serde(default = "float_one")]
+    pub ui_scale: f32,
 }
 
 impl Config {
@@ -283,6 +285,7 @@ impl Config {
         {
             self.show_console = false;
         }
+        self.ui_scale = self.ui_scale.max(0.5);
         self
     }
 }
@@ -320,6 +323,7 @@ impl Default for Config {
             play_noise_when_disabled: false,
             ignored_click_types: IgnoredClickTypes::default(),
             use_ingame_time: false,
+            ui_scale: 1.0,
         }
     }
 }
@@ -438,6 +442,7 @@ pub struct Bot {
     pub level_start: Instant,
     pub clickpack_db: ClickpackDb,
     pub clickpack_db_open: bool,
+    pub prev_scale_factor: f32,
 }
 
 impl Default for Bot {
@@ -475,6 +480,7 @@ impl Default for Bot {
             level_start: now,
             clickpack_db: ClickpackDb::default(),
             clickpack_db_open: false,
+            prev_scale_factor: 1.0,
         }
     }
 }
@@ -1071,6 +1077,9 @@ impl Bot {
             self.prev_conf = self.conf.clone();
         }
 
+        // change ui scale if needed
+        ctx.set_zoom_factor(self.conf.ui_scale.max(0.01));
+
         // dialog on first launch
         if self.env.is_first_launch {
             let modal = Modal::new(ctx, "first_launch_dialog");
@@ -1164,7 +1173,7 @@ impl Bot {
                             self.show_audio_window(ui, &mut toasts);
                         });
                     }
-                    Stage::Options => self.show_options_window(ui, modal.clone(), &mut toasts),
+                    Stage::Options => self.show_options_window(ui, ctx, modal.clone(), &mut toasts),
                 };
             });
         });
@@ -1194,6 +1203,7 @@ impl Bot {
     fn show_options_window(
         &mut self,
         ui: &mut egui::Ui,
+        ctx: &egui::Context,
         modal: Arc<Mutex<Modal>>,
         toasts: &mut Toasts,
     ) {
@@ -1228,6 +1238,19 @@ impl Bot {
             );
         });
         ui.collapsing("Configuration", |ui| {
+            let slider =
+                ui.add(egui::Slider::new(&mut self.conf.ui_scale, 0.5..=5.0).text("UI Scale"));
+            if slider.clicked() {
+                self.prev_scale_factor = ctx.zoom_factor();
+            }
+            egui_gl_hook::set_changing_scale(
+                slider.changed()
+                    || slider.clicked()
+                    || slider.dragged()
+                    || slider.drag_released()
+                    || slider.has_focus(),
+                self.prev_scale_factor,
+            );
             #[cfg(not(feature = "geode"))]
             ui.horizontal(|ui| {
                 help_text(
@@ -1468,9 +1491,14 @@ impl Bot {
             let timings_copy = self.conf.timings.clone();
             let timings = &mut self.conf.timings;
 
-            help_text(ui, "Uses in-game level time instead of real time", |ui| {
-                ui.checkbox(&mut self.conf.use_ingame_time, "Use in-game time");
-            });
+            help_text(
+                ui,
+                "Use in-game level time instead of real time.\n\
+                Less realistic with practice mode or speedhack",
+                |ui| {
+                    ui.checkbox(&mut self.conf.use_ingame_time, "Use in-game time");
+                },
+            );
             help_text(
                 ui,
                 "Plays platformer left/right sounds even if your clickpack doesn't have them",

@@ -30,9 +30,22 @@ struct EguiState {
     window_handle: HDC,
     original_gl_context: HGLRC,
     new_gl_context: HGLRC,
+    is_changing_scale: bool,
+    prev_scale: f32,
 }
 
 static mut STATE: Option<EguiState> = None; // unsafe, sure, but also way easier to make work
+
+pub fn set_changing_scale(is_changing_scale: bool, prev_scale: f32) {
+    unsafe {
+        if let Some(state) = &mut STATE {
+            state.is_changing_scale = is_changing_scale;
+            if is_changing_scale {
+                state.prev_scale = prev_scale;
+            }
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -135,6 +148,8 @@ pub unsafe fn init(window_handle: HDC) -> Result<(), Error> {
         window_handle,
         original_gl_context,
         new_gl_context,
+        is_changing_scale: false,
+        prev_scale: 1.0,
     });
 
     Ok(())
@@ -198,7 +213,7 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
 
     state.painter.paint_primitives(
         [dimensions.0, dimensions.1],
-        state.egui_ctx.pixels_per_point(),
+        pixels_per_point,
         &clipped_primitives,
     ); // actual opengl calls to render
 
@@ -430,10 +445,18 @@ pub fn on_event(umsg: u32, wparam: usize, lparam: isize) -> Result<bool, Error> 
 }
 
 fn get_pos(lparam: isize) -> Pos2 {
+    let state = unsafe { &mut STATE.as_mut().unwrap() };
+    let zoom_factor = state.egui_ctx.zoom_factor();
+
     let x = (lparam & 0xFFFF) as i16 as f32;
     let y = (lparam >> 16 & 0xFFFF) as i16 as f32;
 
-    Pos2::new(x, y)
+    if state.is_changing_scale {
+        let prev_scale = state.prev_scale;
+        Pos2::new(x / prev_scale, y / prev_scale)
+    } else {
+        Pos2::new(x / zoom_factor, y / zoom_factor)
+    }
 }
 
 fn get_key_modifiers(msg: u32) -> Modifiers {
