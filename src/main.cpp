@@ -2,6 +2,7 @@
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/LevelEditorLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/PlayerObject.hpp>
 
 using namespace geode::prelude;
 
@@ -50,6 +51,7 @@ void zcblive_on_init(PlayLayer* playlayer);
 void zcblive_on_quit();
 void zcblive_on_death();
 bool zcblive_do_force_player2_sounds();
+bool zcblive_do_use_alternate_hook();
 }
 
 // clang-format off
@@ -70,14 +72,54 @@ inline double getTime() {
                             : 0.0;
 }
 
+void handleAction(int button, bool player1, bool push, PlayLayer* playLayer) {
+    zcblive_on_action(static_cast<uint8_t>(button),
+                      !player1 && playLayer &&
+                          (playLayer->m_levelSettings->m_twoPlayerMode ||
+                           zcblive_do_force_player2_sounds()),
+                      push);
+}
+
 // clang-format off
+class $modify(PlayerObject) {
+	void handlePushOrRelease(PlayerButton button, bool push) {
+		if (PlayLayer::get() == nullptr && LevelEditorLayer::get() == nullptr) {
+			zcblive_set_is_in_level(false);
+			return;
+		}
+		if ((button == PlayerButton::Left || button == PlayerButton::Right) && !this->m_isPlatformer) {
+			return;
+		}
+
+		zcblive_set_is_in_level(true);
+		zcblive_set_playlayer_time(getTime());
+
+		auto playLayer = PlayLayer::get();
+		bool player1 = playLayer && this == playLayer->m_player1;
+		handleAction(static_cast<int>(button), player1, push, playLayer);
+	}
+
+	void pushButton(PlayerButton button) {
+		if (zcblive_do_use_alternate_hook()) {
+			handlePushOrRelease(button, true);
+		}
+		PlayerObject::pushButton(button);
+	}
+
+	void releaseButton(PlayerButton button) {
+		if (zcblive_do_use_alternate_hook()) {
+			handlePushOrRelease(button, false);
+		}
+		PlayerObject::releaseButton(button);
+	}
+};
+
 class $modify(GJBaseGameLayer) {
 	void handleButton(bool push, int button, bool player1) {
-		// if (PlayLayer::get() == nullptr && LevelEditorLayer::get() == nullptr) {
-		// 	zcblive_set_is_in_level(false);
-		// 	GJBaseGameLayer::handleButton(push, button, player1);
-		// 	return;
-		// }
+		if (zcblive_do_use_alternate_hook()) {
+			GJBaseGameLayer::handleButton(push, button, player1);
+			return;
+		}
 		zcblive_set_is_in_level(true);
 		zcblive_set_playlayer_time(getTime());
 
@@ -86,12 +128,7 @@ class $modify(GJBaseGameLayer) {
                         && !(player1 && playLayer->m_player1->m_isPlatformer)
                         && !(!player1 && playLayer->m_player2->m_isPlatformer));
 		if (!is_invalid) {
-			zcblive_on_action(
-				button,
-				!player1 && playLayer && (playLayer->m_levelSettings->m_twoPlayerMode
-										  	|| zcblive_do_force_player2_sounds()),
-				push
-			);
+			handleAction(button, player1, push, playLayer);
 		}
 		
 		GJBaseGameLayer::handleButton(push, button, player1);

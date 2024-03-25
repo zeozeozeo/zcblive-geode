@@ -5,10 +5,12 @@ macro_rules! impl_default {
     () => {
         pub const NULL: Self = Self { addr: 0 };
 
+        #[inline]
         pub const fn is_null(&self) -> bool {
             self.addr == 0
         }
 
+        #[inline]
         pub const fn new(addr: usize) -> Self {
             Self { addr }
         }
