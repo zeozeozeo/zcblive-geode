@@ -326,37 +326,39 @@ impl PlayerClicks {
 
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn load_from_dir(&mut self, path: &Path) {
-        log::debug!("trying to match directory {path:?}");
+        log::debug!("trying to match directory {:?}", path);
         if path.is_file() {
-            log::debug!("skipping matching file {path:?}");
+            log::debug!("skipping matching file {:?}", path);
             return;
         }
-        let filename = path.file_name().unwrap().to_string_lossy().to_lowercase();
+        let filename: String = path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .flat_map(|c| c.to_lowercase())
+            .collect();
         let patterns = [
-            ("hard", "click", &mut self.hardclicks),
-            ("hard", "release", &mut self.hardreleases),
-            ("", "click", &mut self.clicks),
-            ("", "release", &mut self.releases),
-            ("soft", "click", &mut self.softclicks),
-            ("soft", "release", &mut self.softreleases),
-            ("micro", "click", &mut self.microclicks),
-            ("micro", "release", &mut self.microreleases),
+            (["hardclick", "hardclicks"], &mut self.hardclicks),
+            (["hardrelease", "hardreleases"], &mut self.hardreleases),
+            (["click", "clicks"], &mut self.clicks),
+            (["release", "releases"], &mut self.releases),
+            (["softclick", "softclicks"], &mut self.softclicks),
+            (["softrelease", "softreleases"], &mut self.softreleases),
+            (["microclick", "microclicks"], &mut self.microclicks),
+            (["microrelease", "microreleases"], &mut self.microreleases),
         ];
         let mut matched_any = false;
-        for (pat1, pat2, clicks) in patterns {
-            let is_pat = if !pat1.is_empty() {
-                filename.contains(pat1) && filename.contains(pat2)
-            } else {
-                filename.contains(pat2)
-            };
-            if is_pat {
-                log::debug!("directory {path:?} matched pattern (\"{pat1}\", \"{pat2}\")");
+        for (pats, clicks) in patterns {
+            if pats.iter().any(|pat| *pat == filename) {
+                log::debug!("directory {path:?} matched patterns {pats:?}");
                 matched_any = true;
-                *clicks = read_clicks_in_directory(path)
+                *clicks = read_clicks_in_directory(path);
             }
         }
         if !matched_any {
-            log::warn!("directory {path:?} did not match any pattern");
+            log::warn!("directory {:?} did not match any pattern", path);
         }
     }
 
@@ -538,11 +540,13 @@ impl Clickpack {
         // this is probably the most confusing code i've ever written
         let mut has_cleared = false;
         for (i, dir) in CLICKPACK_DIRNAMES.iter().enumerate() {
-            let sounds = &mut self[if load_for != LoadClickpackFor::All {
+            let sound_idx = if load_for != LoadClickpackFor::All {
                 load_for.to_index() - 1 // because All is the first variant
             } else {
                 i
-            }];
+            };
+            log::info!("sound index {sound_idx}");
+            let sounds = &mut self[sound_idx];
             if load_for != LoadClickpackFor::All && !has_cleared {
                 log::debug!("clearing sound list for {load_for:?}");
                 sounds.clear();
