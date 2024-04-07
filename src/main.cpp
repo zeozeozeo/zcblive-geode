@@ -52,6 +52,7 @@ void zcblive_on_quit();
 void zcblive_on_death();
 bool zcblive_do_force_player2_sounds();
 bool zcblive_do_use_alternate_hook();
+void zcblive_on_update(float dt);
 }
 
 // clang-format off
@@ -73,6 +74,12 @@ inline double getTime() {
 }
 
 void handleAction(int button, bool player1, bool push, PlayLayer* playLayer) {
+    // seems to be isPaused?
+    if (playLayer &&
+        *reinterpret_cast<bool*>(reinterpret_cast<char*>(playLayer) + 0x2f17)) {
+        return;
+    }
+
     zcblive_on_action(static_cast<uint8_t>(button),
                       !player1 && playLayer &&
                           (playLayer->m_levelSettings->m_twoPlayerMode ||
@@ -83,7 +90,8 @@ void handleAction(int button, bool player1, bool push, PlayLayer* playLayer) {
 // clang-format off
 class $modify(PlayerObject) {
 	void handlePushOrRelease(PlayerButton button, bool push) {
-		if (PlayLayer::get() == nullptr && LevelEditorLayer::get() == nullptr) {
+		auto playLayer = PlayLayer::get();
+		if (playLayer == nullptr && LevelEditorLayer::get() == nullptr) {
 			zcblive_set_is_in_level(false);
 			return;
 		}
@@ -94,7 +102,6 @@ class $modify(PlayerObject) {
 		zcblive_set_is_in_level(true);
 		zcblive_set_playlayer_time(getTime());
 
-		auto playLayer = PlayLayer::get();
 		bool player1 = playLayer && this == playLayer->m_player1;
 		handleAction(static_cast<int>(button), player1, push, playLayer);
 	}
@@ -135,6 +142,7 @@ class $modify(GJBaseGameLayer) {
 	}
 
 	void update(float dt) {
+		zcblive_on_update(dt);
 		GJBaseGameLayer::update(dt);
 		zcblive_set_playlayer_time(getTime());
 	}
@@ -157,8 +165,10 @@ class $modify(PlayLayer) {
 	}
 
 	void destroyPlayer(PlayerObject* player, GameObject* hit) {
-		zcblive_on_death();
 		PlayLayer::destroyPlayer(player, hit);
+		if (player->m_isDead) {
+			zcblive_on_death();
+		}
 	}
 };
 

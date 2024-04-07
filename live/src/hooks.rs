@@ -24,11 +24,14 @@ macro_rules! hook {
 }
 
 pub mod play_layer {
-    use crate::{game::PlayLayer, BOT};
+    use crate::{
+        game::{PlayLayer, PlayerObject},
+        BOT,
+    };
 
     retour::static_detour! {
         pub static RESET_LEVEL_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer);
-        pub static DESTROY_PLAYER_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer, usize, usize, usize);
+        pub static DESTROY_PLAYER_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer, usize, PlayerObject, usize);
     }
 
     pub fn reset_level(this: PlayLayer) {
@@ -38,10 +41,14 @@ pub mod play_layer {
         }
     }
 
-    pub fn destroy_player(this: PlayLayer, _edx: usize, player: usize, hit: usize) {
+    pub fn destroy_player(this: PlayLayer, _edx: usize, player: PlayerObject, hit: usize) {
         unsafe {
-            BOT.on_death();
             DESTROY_PLAYER_ORIGINAL.call(this, 0, player, hit);
+
+            // check for noclip
+            if player.is_dead() {
+                BOT.on_death();
+            }
         }
     }
 }
@@ -98,6 +105,7 @@ pub mod base_game_layer {
         pub static DESTRUCTOR_ORIGINAL: unsafe extern "fastcall" fn(usize);
         pub static INIT_ORIGINAL: unsafe extern "fastcall" fn (usize);
         pub static HANDLE_BUTTON_ORIGINAL: unsafe extern "fastcall" fn (usize, usize, bool, i32, bool);
+        pub static UPDATE_ORIGINAL: unsafe extern "fastcall" fn (usize, usize, f32);
     }
 
     pub fn destructor(this: usize) {
@@ -135,6 +143,13 @@ pub mod base_game_layer {
             HANDLE_BUTTON_ORIGINAL.call(this, 0, push, button, player1);
         }
     }
+
+    pub fn update(this: usize, _edx: usize, dt: f32) {
+        unsafe {
+            BOT.on_update(dt);
+            UPDATE_ORIGINAL.call(this, 0, dt);
+        }
+    }
 }
 
 pub unsafe fn init_hooks() -> Result<()> {
@@ -153,6 +168,7 @@ pub unsafe fn init_hooks() -> Result<()> {
         hook!(DESTRUCTOR_ORIGINAL -> destructor @ *BASE + 0x2dc080);
         hook!(INIT_ORIGINAL -> init @ *BASE + 0x190290);
         hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x1b69f0);
+        hook!(UPDATE_ORIGINAL -> update @ *BASE + 0x1bb780);
     }
     log::info!("all hooks initialized!");
     Ok(())
@@ -175,6 +191,7 @@ pub unsafe fn disable_hooks() -> Result<()> {
         DESTRUCTOR_ORIGINAL.disable()?;
         INIT_ORIGINAL.disable()?;
         HANDLE_BUTTON_ORIGINAL.disable()?;
+        UPDATE_ORIGINAL.disable()?;
     }
     log::info!("all hooks disabled");
     Ok(())

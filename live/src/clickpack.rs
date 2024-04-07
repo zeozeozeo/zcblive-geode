@@ -247,7 +247,7 @@ impl ClickType {
 #[derive(Clone)]
 pub struct SoundWrapper {
     pub sound: Sound,
-    pub pathbuf: PathBuf,
+    // pub pathbuf: PathBuf,
     // fmod_sound: *mut FMOD_SOUND,
 }
 
@@ -257,7 +257,7 @@ impl SoundWrapper {
         let sound = Sound::from_path(path)?;
         Ok(Self {
             sound,
-            pathbuf: path.to_path_buf(),
+            // pathbuf: path.to_path_buf(),
         })
     }
 }

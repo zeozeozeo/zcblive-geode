@@ -449,6 +449,8 @@ pub struct Bot {
     pub clickpack_db: ClickpackDb,
     pub clickpack_db_open: bool,
     pub prev_scale_factor: f32,
+    pub dead_timer: f32,
+    pub dead_timer_limit: f32,
 }
 
 impl Default for Bot {
@@ -487,6 +489,8 @@ impl Default for Bot {
             clickpack_db: ClickpackDb::default(),
             clickpack_db_open: false,
             prev_scale_factor: 1.0,
+            dead_timer: f32::NAN,
+            dead_timer_limit: 0.0,
         }
     }
 }
@@ -805,6 +809,7 @@ impl Bot {
         self.prev_spam_offset = 0.0;
         self.is_in_level = true;
         self.level_start = Instant::now();
+        self.dead_timer = f32::NAN;
     }
 
     pub fn on_reset(&mut self) {
@@ -820,14 +825,17 @@ impl Bot {
         //    }
         //}
         self.prev_times = ClickTimes::default();
+        self.dead_timer = f32::NAN;
     }
 
     pub fn on_exit(&mut self) {
         self.on_init(0);
         self.is_in_level = false;
+        self.dead_timer = f32::NAN;
     }
 
     unsafe fn release_buttons(&mut self) {
+        log::info!("releasing buttons on death");
         for (button, t) in [
             (Button::Jump, self.prev_times.jump),
             (Button::Left, self.prev_times.left),
@@ -842,12 +850,14 @@ impl Bot {
     }
 
     pub unsafe fn on_death(&mut self) {
-        // release all buttons that are still pressed
         if !self.conf.release_buttons_on_death {
             return;
         }
+
         let mut release_delay = self.conf.death_release_delay;
         let offset = self.conf.death_release_delay_offset;
+
+        // release all buttons that are still pressed (or do that in the future)
         if release_delay == 0.0 && offset == 0.0 {
             self.release_buttons();
         } else {
@@ -862,10 +872,18 @@ impl Bot {
                 self.release_buttons();
                 return;
             }
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs_f64(release_delay));
-                BOT.release_buttons();
-            });
+            self.dead_timer_limit = release_delay as f32;
+            self.dead_timer = 0.0;
+        }
+    }
+
+    pub unsafe fn on_update(&mut self, dt: f32) {
+        if !self.dead_timer.is_nan() {
+            self.dead_timer += dt;
+            if self.dead_timer >= self.dead_timer_limit {
+                self.dead_timer = f32::NAN;
+                self.release_buttons();
+            }
         }
     }
 
@@ -878,7 +896,7 @@ impl Bot {
             player2 = self.conf.force_player2_sounds;
         }
         #[cfg(not(feature = "geode"))]
-        if !self.playlayer.is_null() && (self.playlayer.is_paused() || self.time() == 0.0) {
+        if !self.playlayer.is_null() && self.playlayer.is_paused() {
             return;
         }
         if button.is_platformer()
@@ -889,6 +907,9 @@ impl Bot {
         }
 
         let now = self.time();
+        if now == 0.0 {
+            return;
+        }
         let prev_time =
             self.prev_times
                 .get_prev_time(button, player2, self.conf.decouple_platformer);
@@ -1261,7 +1282,7 @@ impl Bot {
                     slider.changed()
                         || slider.clicked()
                         || slider.dragged()
-                        || slider.drag_released()
+                        || slider.drag_stopped()
                         || slider.has_focus(),
                     self.prev_scale_factor,
                 );
@@ -1483,7 +1504,7 @@ impl Bot {
                         0.0..=f64::INFINITY,
                         "",
                     )
-                    .drag_released()
+                    .drag_stopped()
                     {
                         self.play_noise(); // restart noise
                     }
@@ -1740,7 +1761,7 @@ impl Bot {
                     0.0..=f64::INFINITY,
                     "Speed multiplier for noise. Only useful if your clickpack has a noise file",
                 )
-                .drag_released()
+                .drag_stopped()
                 {
                     self.play_noise();
                 }

@@ -52,6 +52,7 @@ pub struct PlayerObject {
 impl PlayerObject {
     impl_default!();
     impl_get_set!(is_platformer, set_is_platformer, bool, 0x920);
+    impl_get_set!(is_dead, set_is_dead, bool, 0x7b0);
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
