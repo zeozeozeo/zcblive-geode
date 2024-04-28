@@ -668,10 +668,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui-toast"
-version = "0.13.0"
+name = "egui-notify"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d35b823ed2488732e085cb1abd1144f23f9546e5c89f4492047c123d27a1a826"
+checksum = "319327faee7bb116bcdbe43af1b8cbea06dc5d9ddbb23d35e012949afbd76cde"
 dependencies = [
  "egui",
 ]
@@ -1550,9 +1550,9 @@ checksum = "bb813b8af86854136c6922af0598d719255ecb2179515e6e7730d468f05c9cae"
 
 [[package]]
 name = "parking_lot"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
+checksum = "7e4af0ca4f6caed20e900d564c242b8e5d4903fdacf31d3daf527b66fe6f42fb"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -2958,13 +2958,14 @@ dependencies = [
  "egui",
  "egui-keybind",
  "egui-modal",
- "egui-toast",
+ "egui-notify",
  "egui_clickpack_db",
  "egui_gl_hook",
  "fastrand",
  "kittyaudio",
  "log",
  "once_cell",
+ "parking_lot",
  "retour",
  "rfd",
  "serde",

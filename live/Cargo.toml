@@ -5,12 +5,12 @@ edition = "2021"
 build = "build.rs"
 
 [lib]
-crate-type = ["cdylib"] # `cdylib` for DLL, `staticlib` for Geode
+crate-type = ["cdylib"] # `staticlib` for DLL, `staticlib` for Geode
 
 [profile.release]
-lto = "fat"
-codegen-units = 1
-strip = true
+#lto = "fat"
+#codegen-units = 1
+#strip = true
 
 [workspace]
 members = [".", "egui_gl_hook", "gfmod"]
@@ -22,7 +22,6 @@ anyhow = "1.0.81"
 egui = "0.27"
 egui-keybind = { version = "0.3.0", features = ["serde"] }
 egui-modal = "0.3.6"
-egui-toast = "0.13"
 egui_gl_hook = { path = "egui_gl_hook" }
 kittyaudio = "0.1.9"
 log = "0.4"
@@ -46,6 +45,8 @@ fastrand = "2"
 # git = "https://github.com/zeozeozeo/egui_clickpack_db.git"
 egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git", features = ["live"] }
 ureq = "2.9.6"
+egui-notify = "0.14.0"
+parking_lot = "0.12.2"
 # gfmod = { path = "gfmod" }
 
 [build-dependencies]

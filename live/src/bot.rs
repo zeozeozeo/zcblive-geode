@@ -7,15 +7,15 @@ use crate::{
 };
 use anyhow::Result;
 use egui::{
-    emath, pos2, vec2, Align2, Color32, Direction, DragValue, Key, KeyboardShortcut, Modifiers,
-    RichText,
+    emath, epaint::Shadow, vec2, Color32, DragValue, Key, KeyboardShortcut, Modifiers, RichText,
 };
 use egui_clickpack_db::ClickpackDb;
 use egui_keybind::{Bind, Keybind, Shortcut};
 use egui_modal::{Icon, Modal};
-use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
+use egui_notify::{Toast, Toasts};
 use kittyaudio::{Device, Mixer, PlaybackRate, SoundHandle, StreamSettings};
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -24,7 +24,7 @@ use std::{
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, Once,
+        Arc, Once,
     },
     time::{Duration, Instant},
 };
@@ -215,6 +215,25 @@ const fn death_release_delay_offset_default() -> f64 {
     0.13
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+pub enum ToastVisibility {
+    #[default]
+    AlwaysVisible,
+    VisibleWhenOpen,
+    NeverVisible,
+}
+
+impl ToastVisibility {
+    #[inline]
+    const fn text(self) -> &'static str {
+        match self {
+            ToastVisibility::AlwaysVisible => "Always Visible",
+            ToastVisibility::VisibleWhenOpen => "Visible in Menu",
+            ToastVisibility::NeverVisible => "Never Visible",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct Config {
     pub pitch_enabled: bool,
@@ -277,6 +296,8 @@ pub struct Config {
     pub use_ingame_time: bool,
     #[serde(default = "float_one")]
     pub ui_scale: f32,
+    #[serde(default)]
+    pub toast_visibility: ToastVisibility,
 }
 
 impl Config {
@@ -328,6 +349,7 @@ impl Default for Config {
             ignored_click_types: IgnoredClickTypes::default(),
             use_ingame_time: false,
             ui_scale: 1.0,
+            toast_visibility: ToastVisibility::default(),
         }
     }
 }
@@ -437,7 +459,7 @@ pub struct Bot {
     // pub system: *mut FMOD_SYSTEM,
     // pub channel: *mut FMOD_CHANNEL,
     pub env: Env,
-    pub toast_queue: Arc<Mutex<Vec<Toast>>>,
+    pub toasts: Arc<Mutex<Toasts>>,
     // pub fmod_noise_sound: *mut FMOD_CHANNEL,
     pub show_fmod_buffersize_warn: bool,
     pub startup_buffer_size: u32,
@@ -477,7 +499,7 @@ impl Default for Bot {
             // system: std::ptr::null_mut(),
             // channel: std::ptr::null_mut(),
             env: Env::load(),
-            toast_queue: Arc::new(Mutex::new(vec![])),
+            toasts: Arc::new(Mutex::new(Toasts::new())),
             // fmod_noise_sound: std::ptr::null_mut(),
             show_fmod_buffersize_warn: false,
             startup_buffer_size,
@@ -534,7 +556,6 @@ fn show_error_dialog(modal: Arc<Mutex<Modal>>, title: &str, body: &str) {
     log::error!("{title}: {body}");
     modal
         .lock()
-        .unwrap()
         .dialog()
         .with_title(title)
         .with_body(utils::capitalize_first_letter(body))
@@ -713,7 +734,7 @@ impl Bot {
         use std::thread::JoinHandle;
 
         let preload_clickpack = |path: PathBuf,
-                                 toast_queue: Arc<Mutex<Vec<Toast>>>,
+                                 toasts: Arc<Mutex<Toasts>>,
                                  join_handle: Option<JoinHandle<()>>,
                                  load_for: LoadClickpackFor|
          -> JoinHandle<()> {
@@ -729,11 +750,9 @@ impl Bot {
             std::thread::spawn(move || {
                 Self::load_clickpack_thread(
                     |e| {
-                        toast_queue.lock().unwrap().push(Toast {
-                            kind: ToastKind::Error,
-                            text: format!("Failed to preload clickpack: {e}").into(),
-                            options: ToastOptions::default().duration_in_seconds(5.0),
-                        })
+                        toasts
+                            .lock()
+                            .add(Toast::error(format!("Failed to preload clickpack: {e}")));
                     },
                     &path,
                     is_loading_clickpack,
@@ -752,7 +771,7 @@ impl Bot {
                         if dirname == name {
                             prev_join_handle = Some(preload_clickpack(
                                 PathBuf::from(".zcb").join("clickpacks").join(dirname),
-                                self.toast_queue.clone(),
+                                self.toasts.clone(),
                                 prev_join_handle,
                                 *load_for,
                             ));
@@ -761,17 +780,15 @@ impl Bot {
                         }
                     }
                     if !found {
-                        self.toast_queue.lock().unwrap().push(Toast {
-                            kind: ToastKind::Error,
-                            text: format!("Clickpack \"{name}\" not found").into(),
-                            options: ToastOptions::default().duration_in_seconds(3.0),
-                        })
+                        self.toasts
+                            .lock()
+                            .add(Toast::error(format!("Clickpack \"{name}\" not found")));
                     }
                 }
                 ClickpackEnv::Path(path) => {
                     prev_join_handle = Some(preload_clickpack(
                         path.clone(),
-                        self.toast_queue.clone(),
+                        self.toasts.clone(),
                         prev_join_handle,
                         *load_for,
                     ));
@@ -1036,16 +1053,12 @@ impl Bot {
         }
     }
 
-    fn open_clickbot_toggle_toast(&self, toasts: &mut Toasts) {
-        toasts.add(Toast {
-            kind: ToastKind::Info,
-            text: if self.conf.enabled {
-                "Enabled clickbot".into()
-            } else {
-                "Disabled clickbot".into()
-            },
-            options: ToastOptions::default().duration_in_seconds(2.0),
-        });
+    fn open_clickbot_toggle_toast(&self) {
+        self.toasts.lock().add(Toast::info(if self.conf.enabled {
+            "Enabled clickbot"
+        } else {
+            "Disabled clickbot"
+        }));
     }
 
     fn reload_clickpacks(&mut self) -> Result<()> {
@@ -1145,6 +1158,9 @@ impl Bot {
 
         // don't draw and don't reload clickpacks if not open
         if self.conf.hidden {
+            if matches!(self.conf.toast_visibility, ToastVisibility::AlwaysVisible) {
+                self.toasts.lock().show(ctx); // but still draw toast queue
+            }
             return;
         }
 
@@ -1158,25 +1174,27 @@ impl Bot {
 
         // draw overlay
         let modal = Arc::new(Mutex::new(Modal::new(ctx, "global_modal")));
-        let mut toasts = Toasts::new()
-            .anchor(Align2::RIGHT_BOTTOM, pos2(-16.0, -16.0))
-            .direction(Direction::BottomUp);
 
         if toggle_bot {
-            self.open_clickbot_toggle_toast(&mut toasts);
+            self.open_clickbot_toggle_toast();
             self.play_noise();
         }
         if toggle_noise {
-            self.open_noise_toggle_toast(&mut toasts);
-        }
-
-        // show all queued toasts
-        for toast in self.toast_queue.lock().unwrap().drain(..) {
-            toasts.add(toast);
+            self.open_noise_toggle_toast();
         }
 
         // remove tooltip delay
-        ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+        ctx.style_mut(|s| {
+            s.interaction.tooltip_delay = 0.0;
+            let shadow = Shadow {
+                offset: [6.0, 8.0].into(),
+                blur: 32.0,
+                spread: 0.0,
+                color: egui::Color32::from_black_alpha(120),
+            };
+            s.visuals.popup_shadow = shadow;
+            s.visuals.window_shadow = shadow;
+        });
 
         egui::Window::new("ZCB Live").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -1195,24 +1213,31 @@ impl Bot {
                             .checkbox(&mut self.conf.enabled, "Enable clickbot")
                             .changed()
                         {
-                            self.open_clickbot_toggle_toast(&mut toasts);
+                            self.open_clickbot_toggle_toast();
                             self.play_noise();
                         }
 
                         // ui.separator();
                         ui.add_enabled_ui(self.conf.enabled, |ui| {
-                            self.show_audio_window(ui, &mut toasts);
+                            self.show_audio_window(ui);
                         });
                     }
-                    Stage::Options => self.show_options_window(ui, ctx, modal.clone(), &mut toasts),
+                    Stage::Options => self.show_options_window(ui, ctx, modal.clone()),
                 };
             });
         });
 
+        // show clickpackdb, if open
         self.show_clickpackdb_window(ctx, modal.clone());
 
-        toasts.show(ctx);
-        modal.lock().unwrap().show_dialog();
+        // show modal & toast queue
+        modal.lock().show_dialog();
+        if matches!(
+            self.conf.toast_visibility,
+            ToastVisibility::AlwaysVisible | ToastVisibility::VisibleWhenOpen
+        ) {
+            self.toasts.lock().show(ctx);
+        }
     }
 
     #[cfg(not(feature = "geode"))]
@@ -1236,7 +1261,6 @@ impl Bot {
         ui: &mut egui::Ui,
         ctx: &egui::Context,
         modal: Arc<Mutex<Modal>>,
-        toasts: &mut Toasts,
     ) {
         ui.collapsing("Shortcuts", |ui| {
             let mut show_shortcut = |shortcut: &mut Shortcut, id: &'static str, name: &str| {
@@ -1323,6 +1347,26 @@ impl Bot {
                 |ui| ui.checkbox(&mut self.conf.autosave_config, "Auto-save config"),
             );
 
+            egui::ComboBox::from_label("Toast Visibility")
+                .selected_text(self.conf.toast_visibility.text())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.conf.toast_visibility,
+                        ToastVisibility::AlwaysVisible,
+                        ToastVisibility::AlwaysVisible.text(),
+                    );
+                    ui.selectable_value(
+                        &mut self.conf.toast_visibility,
+                        ToastVisibility::VisibleWhenOpen,
+                        ToastVisibility::VisibleWhenOpen.text(),
+                    );
+                    ui.selectable_value(
+                        &mut self.conf.toast_visibility,
+                        ToastVisibility::NeverVisible,
+                        ToastVisibility::NeverVisible.text(),
+                    );
+                });
+
             ui.horizontal(|ui| {
                 ui.style_mut().spacing.item_spacing.x = 4.0;
                 if ui
@@ -1331,11 +1375,9 @@ impl Bot {
                     .clicked()
                 {
                     self.conf.save();
-                    toasts.add(Toast {
-                        kind: ToastKind::Success,
-                        text: "Saved configuration to .zcb/config.json".into(),
-                        options: ToastOptions::default().duration_in_seconds(2.0),
-                    });
+                    self.toasts
+                        .lock()
+                        .add(Toast::success("Saved configuration to .zcb/config.json"));
                 }
                 ui.style_mut().spacing.item_spacing.x = 4.0;
                 if ui
@@ -1347,11 +1389,9 @@ impl Bot {
                     if let Ok(conf) = conf {
                         self.conf = conf;
                         self.apply_config();
-                        toasts.add(Toast {
-                            kind: ToastKind::Success,
-                            text: "Loaded configuration from .zcb/config.json".into(),
-                            options: ToastOptions::default().duration_in_seconds(2.0),
-                        });
+                        self.toasts
+                            .lock()
+                            .add(Toast::success("Loaded configuration from .zcb/config.json"));
                     } else if let Err(e) = conf {
                         show_error_dialog(modal.clone(), "Failed to load config!", &e.to_string());
                     }
@@ -1366,11 +1406,9 @@ impl Bot {
                     self.conf = Config::default();
                     self.conf.stage = prev_stage; // don't switch current tab
                     self.apply_config();
-                    toasts.add(Toast {
-                        kind: ToastKind::Info,
-                        text: "Reset configuration to defaults".into(),
-                        options: ToastOptions::default().duration_in_seconds(2.0),
-                    });
+                    self.toasts
+                        .lock()
+                        .add(Toast::info("Reset configuration to defaults"));
                 }
                 if ui
                     .button("Open folder")
@@ -1465,16 +1503,12 @@ impl Bot {
         }
     }
 
-    fn open_noise_toggle_toast(&self, toasts: &mut Toasts) {
-        toasts.add(Toast {
-            kind: ToastKind::Info,
-            text: if self.conf.play_noise {
-                "Playing noise".into()
-            } else {
-                "Stopped playing noise".into()
-            },
-            options: ToastOptions::default().duration_in_seconds(2.0),
-        });
+    fn open_noise_toggle_toast(&self) {
+        self.toasts.lock().add(Toast::info(if self.conf.play_noise {
+            "Playing noise"
+        } else {
+            "Stopped playing noise"
+        }));
     }
 
     #[inline]
@@ -1482,7 +1516,7 @@ impl Bot {
         self.is_loading_clickpack.load(Ordering::Relaxed)
     }
 
-    fn show_audio_window(&mut self, ui: &mut egui::Ui, toasts: &mut Toasts) {
+    fn show_audio_window(&mut self, ui: &mut egui::Ui) {
         ui.add_enabled_ui(
             self.clickpack.has_noise() && !self.is_loading_clickpack(),
             |ui| {
@@ -1494,7 +1528,7 @@ impl Bot {
                         .changed()
                     {
                         self.play_noise();
-                        self.open_noise_toggle_toast(toasts);
+                        self.open_noise_toggle_toast();
                     }
 
                     if drag_value(
