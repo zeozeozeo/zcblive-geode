@@ -1156,6 +1156,15 @@ impl Bot {
             modal.open();
         }
 
+        // process toasts, even if not open
+        if toggle_bot {
+            self.open_clickbot_toggle_toast();
+            self.play_noise();
+        }
+        if toggle_noise {
+            self.open_noise_toggle_toast();
+        }
+
         // don't draw and don't reload clickpacks if not open
         if self.conf.hidden {
             if matches!(self.conf.toast_visibility, ToastVisibility::AlwaysVisible) {
@@ -1174,14 +1183,6 @@ impl Bot {
 
         // draw overlay
         let modal = Arc::new(Mutex::new(Modal::new(ctx, "global_modal")));
-
-        if toggle_bot {
-            self.open_clickbot_toggle_toast();
-            self.play_noise();
-        }
-        if toggle_noise {
-            self.open_noise_toggle_toast();
-        }
 
         // remove tooltip delay
         ctx.style_mut(|s| {

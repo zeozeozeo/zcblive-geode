@@ -1,16 +1,16 @@
 [package]
 name = "zcblive"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 build = "build.rs"
 
 [lib]
-crate-type = ["cdylib"] # `staticlib` for DLL, `staticlib` for Geode
+crate-type = ["staticlib"] # `staticlib` for DLL, `staticlib` for Geode
 
 [profile.release]
-#lto = "fat"
-#codegen-units = 1
-#strip = true
+lto = "fat"
+codegen-units = 1
+strip = true
 
 [workspace]
 members = [".", "egui_gl_hook", "gfmod"]
