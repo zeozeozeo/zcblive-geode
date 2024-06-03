@@ -5,7 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [lib]
-crate-type = ["staticlib"] # `staticlib` for DLL, `staticlib` for Geode
+crate-type = ["cdylib"] # `cdylib` for DLL, `staticlib` for Geode
 
 [profile.release]
 lto = "fat"
@@ -30,7 +30,7 @@ retour = { version = "0.3.1", features = ["static-detour"] }
 rfd = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-simple_logger = "4.3.3"
+simple_logger = "5.0.0"
 windows = { version = "0.54.0", features = ["Win32_System_Threading",
                                             "Win32_Foundation",
                                             "Win32_Security",

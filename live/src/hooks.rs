@@ -32,6 +32,7 @@ pub mod play_layer {
     retour::static_detour! {
         pub static RESET_LEVEL_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer);
         pub static DESTROY_PLAYER_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer, usize, PlayerObject, usize);
+        pub static ON_QUIT_ORIGINAL: unsafe extern "fastcall" fn(PlayLayer);
     }
 
     pub fn reset_level(this: PlayLayer) {
@@ -49,6 +50,13 @@ pub mod play_layer {
             if player.is_dead() {
                 BOT.on_death();
             }
+        }
+    }
+
+    pub fn on_quit(this: PlayLayer) {
+        unsafe {
+            BOT.on_exit();
+            ON_QUIT_ORIGINAL.call(this);
         }
     }
 }
@@ -102,18 +110,18 @@ pub mod base_game_layer {
     use crate::{clickpack::Button, game::GameManager, BOT};
 
     retour::static_detour! {
-        pub static DESTRUCTOR_ORIGINAL: unsafe extern "fastcall" fn(usize);
+        //pub static DESTRUCTOR_ORIGINAL: unsafe extern "fastcall" fn(usize);
         pub static INIT_ORIGINAL: unsafe extern "fastcall" fn (usize);
         pub static HANDLE_BUTTON_ORIGINAL: unsafe extern "fastcall" fn (usize, usize, bool, i32, bool);
         pub static UPDATE_ORIGINAL: unsafe extern "fastcall" fn (usize, usize, f32);
     }
 
-    pub fn destructor(this: usize) {
-        unsafe {
-            BOT.on_exit();
-            DESTRUCTOR_ORIGINAL.call(this);
-        }
-    }
+    // pub fn destructor(this: usize) {
+    //     unsafe {
+    //         BOT.on_exit();
+    //         DESTRUCTOR_ORIGINAL.call(this);
+    //     }
+    // }
 
     pub fn init(this: usize) {
         unsafe {
@@ -155,20 +163,21 @@ pub mod base_game_layer {
 pub unsafe fn init_hooks() -> Result<()> {
     {
         use play_layer::*;
-        hook!(RESET_LEVEL_ORIGINAL -> reset_level @ *BASE + 0x2ea130);
-        hook!(DESTROY_PLAYER_ORIGINAL -> destroy_player @ *BASE + 0x2e6730);
+        hook!(RESET_LEVEL_ORIGINAL -> reset_level @ *BASE + 0x3958b0);
+        hook!(DESTROY_PLAYER_ORIGINAL -> destroy_player @ *BASE + 0x3905a0);
+        hook!(ON_QUIT_ORIGINAL -> on_quit @ *BASE + 0x397540);
     }
     {
         use player_object::*;
-        hook!(PUSH_BUTTON_ORIGINAL -> push_button @ *BASE + 0x2d1d30);
-        hook!(RELEASE_BUTTON_ORIGINAL -> release_button @ *BASE + 0x2d1f70);
+        hook!(PUSH_BUTTON_ORIGINAL -> push_button @ *BASE + 0x375f70);
+        hook!(RELEASE_BUTTON_ORIGINAL -> release_button @ *BASE + 0x376200);
     }
     {
         use base_game_layer::*;
-        hook!(DESTRUCTOR_ORIGINAL -> destructor @ *BASE + 0x2dc080);
-        hook!(INIT_ORIGINAL -> init @ *BASE + 0x190290);
-        hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x1b69f0);
-        hook!(UPDATE_ORIGINAL -> update @ *BASE + 0x1bb780);
+        //hook!(DESTRUCTOR_ORIGINAL -> destructor @ *BASE + 0x2dc080);
+        hook!(INIT_ORIGINAL -> init @ *BASE + 0x1f7dd0);
+        hook!(HANDLE_BUTTON_ORIGINAL -> handle_button @ *BASE + 0x2238a0);
+        hook!(UPDATE_ORIGINAL -> update @ *BASE + 0x2277d0);
     }
     log::info!("all hooks initialized!");
     Ok(())
@@ -180,6 +189,7 @@ pub unsafe fn disable_hooks() -> Result<()> {
         use play_layer::*;
         RESET_LEVEL_ORIGINAL.disable()?;
         DESTROY_PLAYER_ORIGINAL.disable()?;
+        ON_QUIT_ORIGINAL.disable()?;
     }
     {
         use player_object::*;
@@ -188,7 +198,7 @@ pub unsafe fn disable_hooks() -> Result<()> {
     }
     {
         use base_game_layer::*;
-        DESTRUCTOR_ORIGINAL.disable()?;
+        //DESTRUCTOR_ORIGINAL.disable()?;
         INIT_ORIGINAL.disable()?;
         HANDLE_BUTTON_ORIGINAL.disable()?;
         UPDATE_ORIGINAL.disable()?;
