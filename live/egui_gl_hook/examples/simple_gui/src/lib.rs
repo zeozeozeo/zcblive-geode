@@ -37,7 +37,7 @@ static_detour! {
 
 type FnWglSwapBuffers = unsafe extern "system" fn(HDC) -> i32;
 
-static mut O_WNDPROC: Option<i32> = None;
+static mut O_WNDPROC: Option<i64> = None;
 static mut GUI_STATE: GuiState = GuiState {
     text: String::new(),
     checked: false,

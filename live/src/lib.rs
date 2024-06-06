@@ -35,7 +35,7 @@ static_detour! {
 type FnWglSwapBuffers = unsafe extern "system" fn(HDC) -> i32;
 
 /// returned from SetWindowLongPtrA
-static mut O_WNDPROC: Option<i32> = None;
+static mut O_WNDPROC: Option<isize> = None;
 
 /// WNDPROC hook
 #[no_mangle]
@@ -72,7 +72,7 @@ unsafe extern "system" fn h_wndproc(
 /// # Safety
 #[cfg(not(feature = "geode"))]
 #[no_mangle]
-pub unsafe extern "system" fn DllMain(dll: u32, reason: u32, _reserved: *mut c_void) -> BOOL {
+pub unsafe extern "system" fn DllMain(dll: u64, reason: u32, _reserved: *mut c_void) -> BOOL {
     match reason {
         DLL_PROCESS_ATTACH => {
             CreateThread(
@@ -108,11 +108,7 @@ fn hk_wgl_swap_buffers(hdc: HDC) -> i32 {
         // initialize egui_gl_hook
         if !egui_gl_hook::is_init() {
             let hwnd = WindowFromDC(hdc);
-            O_WNDPROC = Some(SetWindowLongPtrA(
-                hwnd,
-                GWLP_WNDPROC,
-                h_wndproc as usize as i32,
-            ));
+            O_WNDPROC = Some(SetWindowLongPtrA(hwnd, GWLP_WNDPROC, h_wndproc as isize));
             egui_gl_hook::init(hdc).unwrap();
         }
 
