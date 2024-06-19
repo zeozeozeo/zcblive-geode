@@ -24,7 +24,7 @@ use std::{
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Once,
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -904,6 +904,7 @@ impl Bot {
         }
     }
 
+    #[allow(unused_mut)]
     pub unsafe fn on_action(&mut self, button: Button, mut player2: bool, push: bool) {
         if self.clickpack.num_sounds == 0 || !self.is_in_level || !self.conf.enabled {
             return;
@@ -1246,6 +1247,7 @@ impl Bot {
     #[cfg(not(feature = "geode"))]
     pub fn maybe_alloc_console(&self) {
         if self.conf.show_console && unsafe { AllocConsole() }.is_ok() {
+            use std::sync::Once;
             static INIT_ONCE: Once = Once::new();
             INIT_ONCE.call_once(|| {
                 simple_logger::SimpleLogger::new()

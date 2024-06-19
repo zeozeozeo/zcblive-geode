@@ -39,6 +39,7 @@ using namespace geode::prelude;
 
 // define the Rust library API (libzcblive is statically linked into the DLL)
 extern "C" {
+void zcblive_on_wgl_swap_buffers(HDC hdc);
 void zcblive_initialize();
 void zcblive_uninitialize();
 void zcblive_on_action(uint8_t button, bool player2, bool push);
@@ -53,10 +54,27 @@ bool zcblive_do_use_alternate_hook();
 void zcblive_on_update(float dt);
 }
 
+typedef int(__stdcall* wglSwapBuffers_t)(HDC hdc);
+static wglSwapBuffers_t origWglSwapBuffers = nullptr;
+
+int hk_wglSwapBuffers(HDC hdc) {
+    if (hdc == nullptr) {
+        return origWglSwapBuffers(hdc);
+    }
+    zcblive_on_wgl_swap_buffers(hdc);
+    return origWglSwapBuffers(hdc);
+}
+
 // clang-format off
 $on_mod(Loaded) {
-    // hooks glSwapBuffers (for now), takes panic hook, calls Bot::init
+    // takes panic hook, calls Bot::init
     zcblive_initialize();
+
+	// hook wglSwapBuffers
+	auto opengl = GetModuleHandleA("OPENGL32.dll");
+	origWglSwapBuffers = reinterpret_cast<wglSwapBuffers_t>(GetProcAddress(opengl, "wglSwapBuffers"));
+	(void)Mod::get()->hook(reinterpret_cast<void*>(origWglSwapBuffers), hk_wglSwapBuffers, "wglSwapBuffers")
+		.expect("failed to hook wglSwapBuffers!");
 }
 // clang-format on
 
@@ -99,7 +117,6 @@ class $modify(PlayerObject) {
 	}
 
 	void pushButton(PlayerButton button) {
-		log::info("PlayerObject::pushButton");
 		if (zcblive_do_use_alternate_hook()) {
 			handlePushOrRelease(button, true);
 		}
@@ -107,7 +124,6 @@ class $modify(PlayerObject) {
 	}
 
 	void releaseButton(PlayerButton button) {
-		log::info("PlayerObject::releaseButton");
 		if (zcblive_do_use_alternate_hook()) {
 			handlePushOrRelease(button, false);
 		}

@@ -12,8 +12,12 @@ mod utils;
 use bot::{Bot, BOT};
 use clickpack::Button;
 use once_cell::sync::Lazy;
-use retour::static_detour;
 use std::{ffi::c_void, sync::Once};
+
+#[cfg(not(feature = "geode"))]
+use retour::static_detour;
+
+#[allow(unused_imports)]
 use windows::Win32::{
     Foundation::{BOOL, HMODULE, HWND, LPARAM, LRESULT, TRUE, WPARAM},
     Graphics::Gdi::{WindowFromDC, HDC},
@@ -27,11 +31,13 @@ use windows::Win32::{
 };
 
 // wglSwapBuffers detour
+#[cfg(not(feature = "geode"))]
 static_detour! {
     static h_wglSwapBuffers: unsafe extern "system" fn(HDC) -> i32;
 }
 
 /// wglSwapBuffers function type
+#[cfg(not(feature = "geode"))]
 type FnWglSwapBuffers = unsafe extern "system" fn(HDC) -> i32;
 
 /// returned from SetWindowLongPtrA
@@ -98,17 +104,14 @@ pub unsafe extern "system" fn DllMain(
     TRUE
 }
 
-fn hk_wgl_swap_buffers(hdc: HDC) -> i32 {
+#[no_mangle]
+unsafe extern "C" fn zcblive_on_wgl_swap_buffers(hdc: HDC) {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         log::info!("wglSwapBuffers hooked");
     });
 
     unsafe {
-        if hdc == HDC(0) {
-            return h_wglSwapBuffers.call(hdc);
-        }
-
         // initialize egui_gl_hook
         if !egui_gl_hook::is_init() {
             let hwnd = WindowFromDC(hdc);
@@ -124,6 +127,19 @@ fn hk_wgl_swap_buffers(hdc: HDC) -> i32 {
             }),
         )
         .map_err(|e| log::error!("paint() failed: {e}"));
+
+        // #[cfg(not(feature = "geode"))]
+        // h_wglSwapBuffers.call(hdc);
+    }
+}
+
+#[cfg(not(feature = "geode"))]
+fn hk_wgl_swap_buffers(hdc: HDC) -> i32 {
+    unsafe {
+        if hdc == HDC(0) {
+            return h_wglSwapBuffers.call(hdc);
+        }
+        zcblive_on_wgl_swap_buffers(hdc);
         h_wglSwapBuffers.call(hdc)
     }
 }
@@ -154,6 +170,15 @@ unsafe extern "C" fn zcblive_initialize() {
     #[cfg(feature = "geode")]
     let _ = simple_logger::SimpleLogger::new().init();
 
+    #[cfg(not(feature = "geode"))]
+    init_gl_hook();
+
+    // init bot
+    BOT.init();
+}
+
+#[cfg(not(feature = "geode"))]
+unsafe fn init_gl_hook() {
     // get swapbuffers function (yes, opengl32.dll is also the 64-bit one)
     let opengl = GetModuleHandleA(windows::core::s!("OPENGL32.dll")).unwrap();
     let swap_buffers: FnWglSwapBuffers =
@@ -168,9 +193,6 @@ unsafe extern "C" fn zcblive_initialize() {
     {
         detour.enable().unwrap();
     }
-
-    // init bot
-    BOT.init();
 }
 
 #[no_mangle]
@@ -182,6 +204,7 @@ unsafe extern "C" fn zcblive_uninitialize() {
     #[cfg(not(feature = "geode"))]
     let _ = hooks::disable_hooks().map_err(|e| log::error!("failed to disable hooks: {e}"));
 
+    #[cfg(not(feature = "geode"))]
     if h_wglSwapBuffers
         .disable()
         .map_err(|e| log::error!("failed to disable wglSwapBuffers: {e}"))
