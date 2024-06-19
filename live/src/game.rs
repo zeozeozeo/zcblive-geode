@@ -40,7 +40,7 @@ pub struct LevelSettings {
 
 impl LevelSettings {
     impl_default!();
-    impl_get_set!(is_2player, set_is_2player, bool, 0x118);
+    impl_get_set!(is_2player, set_is_2player, bool, 0x118); // FIXME(2.206): unsure
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -51,8 +51,8 @@ pub struct PlayerObject {
 
 impl PlayerObject {
     impl_default!();
-    impl_get_set!(is_platformer, set_is_platformer, bool, 0x920);
-    impl_get_set!(is_dead, set_is_dead, bool, 0x7b0);
+    impl_get_set!(is_platformer, set_is_platformer, bool, 0xb70);
+    impl_get_set!(is_dead, set_is_dead, bool, 0x9c0);
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -64,12 +64,12 @@ pub struct PlayLayer {
 impl PlayLayer {
     impl_default!();
     impl_get_set!(time, set_time, f64, 0x328);
-    impl_get_set!(player1, set_player1, PlayerObject, 0x878);
-    impl_get_set!(player2, set_player2, PlayerObject, 0x87c);
-    impl_get_set!(level_settings, set_level_settings, LevelSettings, 0x880);
+    impl_get_set!(player1, set_player1, PlayerObject, 0xd98);
+    impl_get_set!(player2, set_player2, PlayerObject, 0xda0);
+    impl_get_set!(level_settings, set_level_settings, LevelSettings, 0xda8);
 
     // erm TODO
-    impl_get_set!(is_paused, set_is_paused, bool, 0x2f17);
+    // impl_get_set!(is_paused, set_is_paused, bool, 0x2f17);
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -95,21 +95,19 @@ impl GameManager {
         unsafe {
             Self {
                 addr: (std::mem::transmute::<usize, unsafe extern "stdcall" fn() -> usize>(
-                    *BASE + 0x121540,
+                    *BASE + 0x172b30,
                 ))(),
             }
         }
     }
 
-    impl_get_set!(play_layer, set_play_layer, PlayLayer, 0x198);
+    impl_get_set!(play_layer, set_play_layer, PlayLayer, 0x208);
     impl_get_set!(
         level_editor_layer,
         set_level_editor_layer,
         LevelEditorLayer,
-        0x19c
+        0x210
     );
-    // impl_get_set!(player1, set_player1, PlayerObject, 0x878);
-    // impl_get_set!(player2, set_player2, PlayerObject, 0x87c);
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]

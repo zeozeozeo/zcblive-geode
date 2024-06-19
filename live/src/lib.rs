@@ -72,14 +72,18 @@ unsafe extern "system" fn h_wndproc(
 /// # Safety
 #[cfg(not(feature = "geode"))]
 #[no_mangle]
-pub unsafe extern "system" fn DllMain(dll: u64, reason: u32, _reserved: *mut c_void) -> BOOL {
+pub unsafe extern "system" fn DllMain(
+    dll: *const c_void,
+    reason: u32,
+    _reserved: *mut c_void,
+) -> BOOL {
     match reason {
         DLL_PROCESS_ATTACH => {
             CreateThread(
                 None,
                 0,
                 Some(zcblive_main),
-                Some(dll as _),
+                Some(dll),
                 THREAD_CREATION_FLAGS(0),
                 None,
             )
@@ -150,7 +154,7 @@ unsafe extern "C" fn zcblive_initialize() {
     #[cfg(feature = "geode")]
     let _ = simple_logger::SimpleLogger::new().init();
 
-    // get swapbuffers function
+    // get swapbuffers function (yes, opengl32.dll is also the 64-bit one)
     let opengl = GetModuleHandleA(windows::core::s!("OPENGL32.dll")).unwrap();
     let swap_buffers: FnWglSwapBuffers =
         std::mem::transmute(GetProcAddress(opengl, windows::core::s!("wglSwapBuffers")));

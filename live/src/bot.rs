@@ -909,11 +909,13 @@ impl Bot {
             return;
         }
         #[cfg(not(feature = "geode"))]
-        if player2 && !self.playlayer.is_null() && !self.playlayer.level_settings().is_2player() {
+        if player2 && !self.playlayer.is_null()
+        /* FIXME(2.206): && !self.playlayer.level_settings().is_2player() */
+        {
             player2 = self.conf.force_player2_sounds;
         }
         #[cfg(not(feature = "geode"))]
-        if !self.playlayer.is_null() && self.playlayer.is_paused() {
+        if !self.playlayer.is_null() {
             return;
         }
         if button.is_platformer()
