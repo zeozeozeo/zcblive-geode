@@ -91,9 +91,13 @@ $on_mod(Unloaded) {
     zcblive_uninitialize();
 }
 
+template <class R, class T> inline R& from(T base, intptr_t offset) {
+    return *reinterpret_cast<R*>(reinterpret_cast<uintptr_t>(base) + offset);
+}
+
 inline double getTime() {
-    return PlayLayer::get() ? (*(double*)((char*)PlayLayer::get() + 0x328))
-                            : 0.0;
+    auto playLayer = PlayLayer::get();
+    return playLayer ? from<double>(playLayer, 968) : 0.0;
 }
 
 void handleAction(int button, bool player1, bool push, PlayLayer* playLayer) {
