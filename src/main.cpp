@@ -33,10 +33,6 @@ using namespace geode::prelude;
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "kernel32.lib")
 
-// for some reason rust hasn't mentioned these
-// #pragma comment(lib, "propsys.lib")
-// #pragma comment(lib, "runtimeobject.lib")
-
 // define the Rust library API (libzcblive is statically linked into the DLL)
 extern "C" {
 void zcblive_on_wgl_swap_buffers(HDC hdc);
@@ -54,35 +50,46 @@ bool zcblive_do_use_alternate_hook();
 void zcblive_on_update(float dt);
 }
 
-typedef int(__stdcall* wglSwapBuffers_t)(HDC hdc);
-static wglSwapBuffers_t origWglSwapBuffers = nullptr;
+class GlHook {
+public:
+    bool m_inited = false;
+    HDC m_deviceContext;
 
-int hk_wglSwapBuffers(HDC hdc) {
-    if (hdc == nullptr) {
-        return origWglSwapBuffers(hdc);
+    void setup(CCEGLView* view) {
+        if (m_inited)
+            return;
+
+        auto* glfwWindow = view->getWindow();
+        m_deviceContext = *reinterpret_cast<HDC*>(
+            reinterpret_cast<uintptr_t>(glfwWindow) + 632);
+        m_inited = true;
     }
-    zcblive_on_wgl_swap_buffers(hdc);
-    return origWglSwapBuffers(hdc);
+};
+
+void __fastcall swapBuffersH(CCEGLView* view) {
+    static GlHook glHook = GlHook();
+    glHook.setup(view);
+
+    zcblive_on_wgl_swap_buffers(glHook.m_deviceContext);
+    view->swapBuffers();
 }
 
-// clang-format off
 $on_mod(Loaded) {
     // takes panic hook, calls Bot::init
     zcblive_initialize();
 
-	// hook wglSwapBuffers
-	auto opengl = GetModuleHandleA("OPENGL32.dll");
-	origWglSwapBuffers = reinterpret_cast<wglSwapBuffers_t>(GetProcAddress(opengl, "wglSwapBuffers"));
-	(void)Mod::get()->hook(reinterpret_cast<void*>(origWglSwapBuffers), hk_wglSwapBuffers, "wglSwapBuffers")
-		.expect("failed to hook wglSwapBuffers!");
+    // hook glSwapBuffers
+    void* swapBuffersPtr = reinterpret_cast<void*>(
+        GetProcAddress(GetModuleHandleA("libcocos2d.dll"),
+                       "?swapBuffers@CCEGLView@cocos2d@@UEAAXXZ"));
+    (void)Mod::get()
+        ->hook(swapBuffersPtr, swapBuffersH, "CCEGLView::swapBuffers")
+        .expect("failed to hook CCEGLView::swapBuffers!");
 }
-// clang-format on
 
-// clang-format off
 $on_mod(Unloaded) {
-	zcblive_uninitialize();
+    zcblive_uninitialize();
 }
-// clang-format on
 
 inline double getTime() {
     return PlayLayer::get() ? (*(double*)((char*)PlayLayer::get() + 0x328))
