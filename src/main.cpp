@@ -1,4 +1,5 @@
 #include <Geode/Geode.hpp>
+#include <Geode/modify/CCEGLView.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/LevelEditorLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
@@ -66,25 +67,21 @@ public:
     }
 };
 
-void __fastcall swapBuffersH(CCEGLView* view) {
-    static GlHook glHook = GlHook();
-    glHook.setup(view);
+// clang-format off
+class $modify(CCEGLView) {
+    void swapBuffers() {
+        static GlHook glHook = GlHook();
+        glHook.setup(this);
 
-    zcblive_on_wgl_swap_buffers(glHook.m_deviceContext);
-    view->swapBuffers();
-}
+        zcblive_on_wgl_swap_buffers(glHook.m_deviceContext);
+        CCEGLView::swapBuffers();
+    }
+};
+// clang-format on
 
 $on_mod(Loaded) {
     // takes panic hook, calls Bot::init
     zcblive_initialize();
-
-    // hook glSwapBuffers
-    void* swapBuffersPtr = reinterpret_cast<void*>(
-        GetProcAddress(GetModuleHandleA("libcocos2d.dll"),
-                       "?swapBuffers@CCEGLView@cocos2d@@UEAAXXZ"));
-    (void)Mod::get()
-        ->hook(swapBuffersPtr, swapBuffersH, "CCEGLView::swapBuffers")
-        .expect("failed to hook CCEGLView::swapBuffers!");
 }
 
 $on_mod(Unloaded) {
