@@ -18,20 +18,20 @@ members = [".", "egui_gl_hook", "gfmod"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.93"
 egui = "0.27"
 egui-keybind = { version = "0.3.0", features = ["serde"] }
 egui-modal = "0.3.6"
 egui_gl_hook = { path = "egui_gl_hook" }
 kittyaudio = "0.1.9"
-log = "0.4"
-once_cell = "1.19.0"
+log = "0.4.22"
+once_cell = "1.20.2"
 retour = { version = "0.3.1", features = ["static-detour"], optional = true }
-rfd = "0.14"
+rfd = "0.15.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 simple_logger = "5.0.0"
-windows = { version = "0.57.0", features = ["Win32_System_Threading",
+windows = { version = "0.58.0", features = ["Win32_System_Threading",
                                             "Win32_Foundation",
                                             "Win32_Security",
                                             "Win32_System_Console",
@@ -41,16 +41,16 @@ windows = { version = "0.57.0", features = ["Win32_System_Threading",
                                             "Win32_System_Diagnostics",
                                             "Win32_System_Memory",
                                             "Win32_System_Diagnostics_Debug"] }
-fastrand = "2"
+fastrand = "2.2.0"
 # git = "https://github.com/zeozeozeo/egui_clickpack_db.git"
 egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git", features = ["live"] }
-ureq = "2.9.6"
+ureq = "2.10.1"
 egui-notify = "0.14.0"
 parking_lot = "0.12.2"
 # gfmod = { path = "gfmod" }
 
 [build-dependencies]
-built = "0.7.1"
+built = "0.7.5"
 
 [features]
 default = []

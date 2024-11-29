@@ -16,7 +16,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/live)
 add_library(zcblive_rust STATIC IMPORTED)
 
 # this is so bad
-set_target_properties(zcblive_rust PROPERTIES IMPORTED_LOCATION_RELEASE ${CMAKE_CURRENT_SOURCE_DIR}/live/target/release/zcblive.lib)
+set_target_properties(zcblive_rust PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/live/target/release/zcblive.lib)
 target_link_libraries(${PROJECT_NAME} zcblive_rust)
 
 if (NOT DEFINED ENV{GEODE_SDK})

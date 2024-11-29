@@ -65,6 +65,15 @@ impl Default for Shortcuts {
     }
 }
 
+fn skip_serializing_selected_device(device: &str) -> bool {
+    let is_default = if let Ok(name) = Device::Default.name() {
+        name == device
+    } else {
+        false
+    };
+    device.is_empty() || is_default
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub enum ClickpackEnv {
     #[default]
@@ -78,6 +87,11 @@ pub struct Env {
     version: String,
     clickpack_ord: Vec<(ClickpackEnv, LoadClickpackFor)>,
     is_first_launch: bool,
+    #[serde(
+        default = "String::new",
+        skip_serializing_if = "skip_serializing_selected_device"
+    )]
+    pub selected_device: String,
 }
 
 impl Default for Env {
@@ -86,6 +100,7 @@ impl Default for Env {
             version: built_info::PKG_VERSION.to_string(),
             clickpack_ord: vec![(ClickpackEnv::None, LoadClickpackFor::All)],
             is_first_launch: true, // overriden later
+            selected_device: String::new(),
         }
     }
 }
@@ -473,6 +488,7 @@ pub struct Bot {
     pub prev_scale_factor: f32,
     pub dead_timer: f32,
     pub dead_timer_limit: f32,
+    pub devices: Arc<Mutex<Vec<String>>>,
 }
 
 impl Default for Bot {
@@ -513,6 +529,7 @@ impl Default for Bot {
             prev_scale_factor: 1.0,
             dead_timer: f32::NAN,
             dead_timer_limit: 0.0,
+            devices: Arc::new(Mutex::new(vec![])),
         }
     }
 }
@@ -703,6 +720,27 @@ impl Bot {
     }
 
     pub fn init(&mut self) {
+        {
+            let devices_arc = self.devices.clone();
+            std::thread::spawn(move || {
+                let mut prev_devices = vec![];
+                loop {
+                    if unsafe { BOT.conf.use_fmod } {
+                        continue;
+                    }
+                    if let Ok(devices) = kittyaudio::device_names() {
+                        // only lock when device lists do not match
+                        if devices != prev_devices {
+                            log::trace!("updated device list: {devices:?}");
+                            *devices_arc.lock() = devices.clone();
+                            prev_devices = devices;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_secs(4));
+                }
+            });
+        }
+
         // init audio playback
         if !self.conf.use_fmod {
             self.maybe_init_kittyaudio();
@@ -1433,8 +1471,56 @@ impl Bot {
     }
 
     fn get_device(&mut self) -> Device {
-        log::debug!("using default device");
-        Device::Default
+        Device::from_name(&self.env.selected_device).unwrap_or_default()
+    }
+
+    fn show_device_switcher(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_label("Output device")
+                .selected_text(&self.env.selected_device)
+                .show_ui(ui, |ui| {
+                    let devices = self.devices.lock().clone();
+                    for device in &devices {
+                        let is_selected = &self.env.selected_device == device;
+                        if ui
+                            .selectable_value(&mut self.env.selected_device, device.clone(), device)
+                            .clicked()
+                            && !is_selected
+                        {
+                            // start a new mixer on new device
+                            log::info!("switching audio device to \"{device}\"");
+                            self.maybe_init_kittyaudio();
+                            self.play_noise();
+                            self.env.save();
+                            self.toasts
+                                .lock()
+                                .add(Toast::success(format!("Switched device to \"{device}\"")));
+                            //kind: ToastKind::Success,
+                            //text: format!("Switched device to \"{device}\"").into(),
+                            //options: ToastOptions::default().duration_in_seconds(3.0),);
+                        }
+                    }
+                })
+                .response
+                .on_disabled_hover_text("Not available with FMOD");
+            if ui
+                .button("Reset")
+                .on_hover_text("Reset to the default audio device")
+                .clicked()
+            {
+                self.mixer = Mixer::new();
+                self.mixer.init();
+                if let Ok(name) = Device::Default.name() {
+                    self.env.selected_device = name.clone();
+                    self.toasts
+                        .lock()
+                        .add(Toast::success(format!("Switched device to \"{name}\"")));
+                }
+                self.play_noise();
+                self.env.save();
+                log::debug!("reset audio device");
+            }
+        });
     }
 
     fn play_noise(&mut self) {
@@ -1568,6 +1654,8 @@ impl Bot {
             },
         );
         */
+        ui.add_enabled_ui(!self.conf.use_fmod, |ui| self.show_device_switcher(ui));
+
         ui.separator();
 
         ui.collapsing("Timings", |ui| {

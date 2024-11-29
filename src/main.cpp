@@ -79,13 +79,14 @@ class $modify(CCEGLView) {
 };
 // clang-format on
 
+void onUnload() {
+    zcblive_uninitialize();
+}
+
 $on_mod(Loaded) {
     // takes panic hook, calls Bot::init
     zcblive_initialize();
-}
-
-$on_mod(Unloaded) {
-    zcblive_uninitialize();
+    std::atexit(onUnload);
 }
 
 template <class R, class T> inline R& from(T base, intptr_t offset) {
