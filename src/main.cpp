@@ -125,18 +125,18 @@ class $modify(PlayerObject) {
 		handleAction(static_cast<int>(button), player1, push, playLayer);
 	}
 
-	void pushButton(PlayerButton button) {
+	bool pushButton(PlayerButton button) {
 		if (zcblive_do_use_alternate_hook()) {
 			handlePushOrRelease(button, true);
 		}
-		PlayerObject::pushButton(button);
+		return PlayerObject::pushButton(button);
 	}
 
-	void releaseButton(PlayerButton button) {
+	bool releaseButton(PlayerButton button) {
 		if (zcblive_do_use_alternate_hook()) {
 			handlePushOrRelease(button, false);
 		}
-		PlayerObject::releaseButton(button);
+		return PlayerObject::releaseButton(button);
 	}
 };
 
