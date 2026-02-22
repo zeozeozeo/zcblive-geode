@@ -272,3 +272,22 @@ unsafe extern "C" fn zcblive_do_use_alternate_hook() -> bool {
 unsafe extern "C" fn zcblive_on_update(dt: f32) {
     BOT.on_update(dt);
 }
+
+#[repr(C)]
+pub struct FMODFns {
+    extra_driver_data: fn() -> *mut c_void,
+}
+
+impl Default for FMODFns {
+    fn default() -> Self {
+        Self {
+            extra_driver_data: unsafe { std::mem::transmute(std::ptr::null_mut() as *mut c_void) },
+        }
+    }
+}
+
+/// required
+#[no_mangle]
+unsafe extern "C" fn zcblive_set_fmod_callbacks(fmod_fns: FMODFns) {
+    //BOT.fmod_fns = fmod_fns;
+}

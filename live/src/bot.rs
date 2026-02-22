@@ -13,6 +13,7 @@ use egui_clickpack_db::ClickpackDb;
 use egui_keybind::{Bind, Keybind, Shortcut};
 use egui_modal::{Icon, Modal};
 use egui_notify::{Toast, Toasts};
+use gfmod::*;
 use kittyaudio::{Device, Mixer, PlaybackRate, SoundHandle, StreamSettings};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -471,11 +472,11 @@ pub struct Bot {
     pub noise_sound: Option<SoundHandle>,
     pub clickpacks: Vec<String>,
     pub last_clickpack_reload: Instant,
-    // pub system: *mut FMOD_SYSTEM,
-    // pub channel: *mut FMOD_CHANNEL,
+    pub system: FmodSystem,
+    pub channel: *mut FMOD_CHANNEL,
     pub env: Env,
     pub toasts: Arc<Mutex<Toasts>>,
-    // pub fmod_noise_sound: *mut FMOD_CHANNEL,
+    pub fmod_noise_sound: *mut FMOD_CHANNEL,
     pub show_fmod_buffersize_warn: bool,
     pub startup_buffer_size: u32,
     pub is_in_level: bool,
@@ -512,11 +513,11 @@ impl Default for Bot {
             noise_sound: None,
             clickpacks: vec![],
             last_clickpack_reload: now,
-            // system: std::ptr::null_mut(),
-            // channel: std::ptr::null_mut(),
+            system: FmodSystem::new(std::ptr::null_mut()),
+            channel: std::ptr::null_mut(),
             env: Env::load(),
             toasts: Arc::new(Mutex::new(Toasts::new())),
-            // fmod_noise_sound: std::ptr::null_mut(),
+            fmod_noise_sound: std::ptr::null_mut(),
             show_fmod_buffersize_warn: false,
             startup_buffer_size,
             is_in_level: false,
@@ -650,73 +651,74 @@ impl Bot {
     }
 
     pub unsafe fn init_fmod(&mut self) -> Result<()> {
-        /*
         const SYSTEM_SAMPLERATE: i32 = 48_000;
         log::info!("initializing fmod system");
         if !self.system.is_null() {
             self.release_fmod();
         }
 
-        FMOD_System_Create(&mut self.system, FMOD_VERSION).fmod_result()?;
-        let extra_driver_data = FMODAudioEngine::shared().extra_driver_data();
+        log::debug!("fmod FMOD_System_Create");
+        FMOD_System_Create(&mut self.system.ptr, FMOD_VERSION).fmod_result()?;
+        //let extra_driver_data = (self.fmod_fns.extra_driver_data)();
 
-        FMOD_System_SetSoftwareFormat(self.system, SYSTEM_SAMPLERATE, FMOD_SPEAKERMODE_STEREO, 0)
+        log::debug!(
+            "fmod FMOD_System_SetSoftwareFormat, system: {:p}",
+            self.system.as_ptr()
+        );
+        FMOD_System_SetSoftwareFormat(*self.system, SYSTEM_SAMPLERATE, FMOD_SPEAKERMODE_STEREO, 0)
             .fmod_result()?;
 
         // set buffer size
         /*
-        FMOD_System_SetStreamBufferSize(self.system, self.conf.buffer_size, FMOD_TIMEUNIT_PCM)
+        FMOD_System_SetStreamBufferSize(*self.system, self.conf.buffer_size, FMOD_TIMEUNIT_PCM)
             .fmod_result()?;
 
         let mut numbuffers = 0i32;
         let mut bufferlength = 0u32;
-        FMOD_System_GetDSPBufferSize(self.system, &mut bufferlength, &mut numbuffers)
+        FMOD_System_GetDSPBufferSize(*self.system, &mut bufferlength, &mut numbuffers)
             .fmod_result()?;
         log::info!(
             "FMOD_System_GetDSPBufferSize: bufferlength: {bufferlength}, numbuffers: {numbuffers}"
         );
-        FMOD_System_SetDSPBufferSize(self.system, self.conf.buffer_size, numbuffers)
+        FMOD_System_SetDSPBufferSize(*self.system, self.conf.buffer_size, numbuffers)
             .fmod_result()?;
-        */
+            */
 
         // init system
         self.fmod_apply_buffer_size()?;
-        FMOD_System_Init(self.system, 2048, FMOD_INIT_NORMAL, extra_driver_data).fmod_result()?;
+        log::debug!("fmod FMOD_System_Init");
+        FMOD_System_Init(*self.system, 2048, FMOD_INIT_NORMAL, std::ptr::null_mut())
+            .fmod_result()?;
 
         log::info!("successfully initialized fmod system, samplerate: {SYSTEM_SAMPLERATE}");
-        */
         Ok(())
     }
 
-    //fn fmod_apply_buffer_size(&self) -> Result<()> {
-    //    /*
-    //    unsafe {
-    //        FMOD_System_SetStreamBufferSize(self.system, self.conf.buffer_size, FMOD_TIMEUNIT_PCM)
-    //            .fmod_result()?;
-    //
-    //        let mut numbuffers = 0i32;
-    //        let mut bufferlength = 0u32;
-    //        FMOD_System_GetDSPBufferSize(self.system, &mut bufferlength, &mut numbuffers)
-    //            .fmod_result()?;
-    //        log::info!(
-    //            "FMOD_System_GetDSPBufferSize: bufferlength: {bufferlength}, numbuffers: {numbuffers}"
-    //        );
-    //        FMOD_System_SetDSPBufferSize(self.system, self.conf.buffer_size, numbuffers)
-    //            .fmod_result()?;
-    //    }
-    //    */
-    //    Ok(())
-    //}
+    fn fmod_apply_buffer_size(&self) -> Result<()> {
+        unsafe {
+            FMOD_System_SetStreamBufferSize(*self.system, self.conf.buffer_size, FMOD_TIMEUNIT_PCM)
+                .fmod_result()?;
+
+            let mut numbuffers = 0i32;
+            let mut bufferlength = 0u32;
+            FMOD_System_GetDSPBufferSize(*self.system, &mut bufferlength, &mut numbuffers)
+                .fmod_result()?;
+            log::info!(
+                "FMOD_System_GetDSPBufferSize: bufferlength: {bufferlength}, numbuffers: {numbuffers}"
+            );
+            FMOD_System_SetDSPBufferSize(*self.system, self.conf.buffer_size, numbuffers)
+                .fmod_result()?;
+        }
+        Ok(())
+    }
 
     pub fn release_fmod(&mut self) {
-        /*
         let _ = unsafe {
-            FMOD_System_Release(self.system)
+            FMOD_System_Release(*self.system)
                 .fmod_result()
                 .map_err(|e| log::error!("failed to release fmod system: {e}"))
         };
-        self.system = std::ptr::null_mut();
-        */
+        *self.system = std::ptr::null_mut();
     }
 
     pub fn init(&mut self) {
@@ -785,6 +787,7 @@ impl Bot {
             }
 
             let is_loading_clickpack = self.is_loading_clickpack.clone();
+            let system = self.system;
             std::thread::spawn(move || {
                 Self::load_clickpack_thread(
                     |e| {
@@ -795,6 +798,7 @@ impl Bot {
                     &path,
                     is_loading_clickpack,
                     load_for,
+                    *system,
                 )
             })
         };
@@ -985,7 +989,6 @@ impl Bot {
         let mut click = self
             .clickpack
             .get_random_click(click_type, player2, button)
-            .sound
             .clone();
         let pitch = self.get_pitch() * self.conf.click_speedhack;
         // if self.conf.sync_speed_with_game {
@@ -1045,27 +1048,22 @@ impl Bot {
             }
         }
         // FIXME: temporary 2.2 fix
-        self.mixer.play(click);
-        /*
         if !use_fmod {
-            self.mixer.play(click);
+            self.mixer.play(click.sound);
         } else {
-            /*
             unsafe {
                 FMOD_System_PlaySound(
-                    self.system,
+                    *self.system,
                     click.fmod_sound,
                     std::ptr::null_mut(),
                     0,
                     &mut self.channel,
                 );
                 FMOD_Channel_SetPitch(self.channel, pitch as f32);
-                FMOD_Channel_SetVolume(self.channel, self.prev_volume);
-                FMOD_System_Update(self.system);
+                FMOD_Channel_SetVolume(self.channel, self.prev_volume as _);
+                FMOD_System_Update(*self.system);
             }
-            */
         }
-        */
         self.prev_times.set_time(
             button,
             player2,
@@ -1532,10 +1530,10 @@ impl Bot {
             }
             *noise_sound = None;
         };
-        // let stop_fmod_noise = |fmodn: &mut *mut FMOD_CHANNEL| {
-        //     unsafe { FMOD_Channel_Stop(*fmodn) };
-        //     *fmodn = std::ptr::null_mut();
-        // };
+        let stop_fmod_noise = |fmodn: &mut *mut FMOD_CHANNEL| {
+            unsafe { FMOD_Channel_Stop(*fmodn) };
+            *fmodn = std::ptr::null_mut();
+        };
         let mut start_kittyaudio_noise = |noise_sound: &mut Option<SoundHandle>| {
             if let Some(mut noise) = self.clickpack.noise.clone() {
                 noise.set_volume(self.conf.noise_volume as f32);
@@ -1546,9 +1544,8 @@ impl Bot {
                 *noise_sound = Some(self.mixer.play(noise.sound));
             }
         };
-        /*
         let start_fmod_noise = |fmodn: &mut *mut FMOD_CHANNEL| unsafe {
-            if let Some(noise) = self.noise.clone() {
+            if let Some(noise) = self.clickpack.noise.clone() {
                 // get sound length
                 // let mut length = 0u32;
                 // FMOD_Sound_GetLength(noise.fmod_sound, &mut length, FMOD_TIMEUNIT_PCM);
@@ -1565,7 +1562,7 @@ impl Bot {
 
                 // play the sound
                 FMOD_System_PlaySound(
-                    self.system,
+                    *self.system,
                     noise.fmod_sound,
                     std::ptr::null_mut(),
                     0,
@@ -1573,21 +1570,20 @@ impl Bot {
                 );
 
                 // update channel
-                FMOD_Channel_SetVolume(*fmodn, self.conf.noise_volume);
+                FMOD_Channel_SetVolume(*fmodn, self.conf.noise_volume as _);
                 // FMOD_Channel_SetLoopPoints(*fmodn, 0, FMOD_TIMEUNIT_PCM, 1024, FMOD_TIMEUNIT_PCM);
                 FMOD_Channel_SetLoopCount(*fmodn, i32::MAX);
                 FMOD_Channel_SetPitch(*fmodn, self.conf.noise_speedhack as f32);
-                FMOD_System_Update(self.system);
+                FMOD_System_Update(*self.system);
             }
         };
-        */
 
         stop_kittyaudio_noise(&mut self.noise_sound);
-        // stop_fmod_noise(&mut self.fmod_noise_sound);
+        stop_fmod_noise(&mut self.fmod_noise_sound);
 
         if self.conf.play_noise && (self.conf.enabled || self.conf.play_noise_when_disabled) {
             if self.conf.use_fmod {
-                // start_fmod_noise(&mut self.fmod_noise_sound);
+                start_fmod_noise(&mut self.fmod_noise_sound);
             } else {
                 start_kittyaudio_noise(&mut self.noise_sound);
             }
@@ -1637,7 +1633,6 @@ impl Bot {
             },
         );
 
-        /*
         help_text(
             ui,
             "Use the internal audio engine for integration with internal recorders",
@@ -1653,7 +1648,6 @@ impl Bot {
                 }
             },
         );
-        */
         ui.add_enabled_ui(!self.conf.use_fmod, |ui| self.show_device_switcher(ui));
 
         ui.separator();
@@ -1903,8 +1897,8 @@ impl Bot {
         });
 
         ui.collapsing("Advanced", |ui| {
-            // let last_bufsize = self.mixer.renderer.guard().last_buffer_size;
-            // ui.label(format!("Real buffer size: {last_bufsize}"));
+            let last_bufsize = self.mixer.renderer.guard().last_buffer_size;
+            ui.label(format!("Real buffer size (kittyaudio): {last_bufsize}"));
             help_text(
                 ui,
                 "Keep playing noise even if the clickbot is disabled",
@@ -1992,6 +1986,7 @@ impl Bot {
         dir: &Path,
         is_loading_clickpack: Arc<AtomicBool>,
         load_for: LoadClickpackFor,
+        system: *mut FMOD_SYSTEM,
     ) {
         unsafe {
             is_loading_clickpack.store(true, Ordering::Relaxed);
@@ -2000,10 +1995,13 @@ impl Bot {
             } else {
                 BOT.stop_noise();
             }
-            let _ = BOT.clickpack.load_from_path(dir, load_for).map_err(|e| {
-                log::error!("failed to load clickpack: {e}");
-                err_fn(e);
-            });
+            let _ = BOT
+                .clickpack
+                .load_from_path(dir, load_for, system)
+                .map_err(|e| {
+                    log::error!("failed to load clickpack: {e}");
+                    err_fn(e);
+                });
             BOT.play_noise();
             is_loading_clickpack.store(false, Ordering::Relaxed);
         }
@@ -2028,6 +2026,7 @@ impl Bot {
                     {
                         let modal_moved = modal.clone();
                         let dirname_moved = dirname.to_string();
+                        let system = self.system;
                         std::thread::spawn(move || {
                             Self::load_clickpack_thread(
                                 |e| {
@@ -2040,6 +2039,7 @@ impl Bot {
                                 &path,
                                 is_loading_clickpack,
                                 load_for,
+                                *system,
                             );
                             unsafe { BOT.env.update(ClickpackEnv::Name(dirname_moved), load_for) };
                         });
@@ -2061,6 +2061,7 @@ impl Bot {
             {
                 let is_loading_clickpack = self.is_loading_clickpack.clone();
                 let load_for = self.conf.load_clickpack_for;
+                let system = self.system;
                 std::thread::spawn(move || {
                     let Some(dir) = FileDialog::new().pick_folder() else {
                         return;
@@ -2077,6 +2078,7 @@ impl Bot {
                         &dir,
                         is_loading_clickpack,
                         load_for,
+                        *system,
                     );
                     unsafe {
                         BOT.env.update(ClickpackEnv::Path(dir), load_for);
@@ -2280,6 +2282,7 @@ impl Bot {
                     self.conf.load_clickpack_for = LoadClickpackFor::All;
                     let is_loading_clickpack = self.is_loading_clickpack.clone();
                     let modal_moved = modal.clone();
+                    let system = self.system;
                     std::thread::spawn(move || {
                         Self::load_clickpack_thread(
                             |e| {
@@ -2292,6 +2295,7 @@ impl Bot {
                             &select_path,
                             is_loading_clickpack,
                             LoadClickpackFor::All,
+                            *system,
                         );
                         unsafe {
                             BOT.env.update(
@@ -2313,7 +2317,7 @@ impl Bot {
 
 impl Drop for Bot {
     fn drop(&mut self) {
-        // self.unload_clickpack();
+        self.unload_clickpack();
         self.release_fmod()
     }
 }

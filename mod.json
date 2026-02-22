@@ -1,18 +1,16 @@
 {
-	"geode": "4.0.1",
-	"gd": {
-		"win": "2.2074"
-	},
-	"version": "v1.0.3",
-	"id": "zeozeozeo.zcblive",
-	"name": "ZCB Live",
-	"developer": "zeozeozeo",
-	"description": "A next-generation Geometry Dash clickbot",
-	"issues": {
-		"info": "Report any bugs/suggestions in the Discord server.",
-		"url": "https://discord.gg/BRVVVzxESu"
-	},
-	"tags": [
-		"music", "utility", "cheat"
-	]
+  "geode": "5.0.0-beta.4",
+  "gd": {
+    "win": "2.2081"
+  },
+  "version": "v1.2.0",
+  "id": "zeozeozeo.zcblive",
+  "name": "ZCB Live",
+  "developer": "zeozeozeo",
+  "description": "A next-generation Geometry Dash clickbot",
+  "issues": {
+    "info": "Report any bugs/suggestions in the Discord server.",
+    "url": "https://discord.gg/BRVVVzxESu"
+  },
+  "tags": ["music", "utility", "cheat"]
 }

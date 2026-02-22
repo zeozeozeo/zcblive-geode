@@ -3152,6 +3152,7 @@ dependencies = [
  "egui_clickpack_db",
  "egui_gl_hook",
  "fastrand",
+ "gfmod",
  "kittyaudio",
  "log",
  "once_cell",

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use gfmod::*;
 use kittyaudio::Sound;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -247,18 +248,48 @@ impl ClickType {
 #[derive(Clone)]
 pub struct SoundWrapper {
     pub sound: Sound,
-    // pub pathbuf: PathBuf,
-    // fmod_sound: *mut FMOD_SOUND,
+    //pub pathbuf: PathBuf,
+    pub fmod_sound: *mut FMOD_SOUND,
 }
 
 impl SoundWrapper {
-    pub fn from_path(path: &Path) -> Result<Self> {
+    pub fn from_path(system: *mut FMOD_SYSTEM, path: &Path) -> Result<Self> {
         // load kittyaudio sound
         let sound = Sound::from_path(path)?;
-        Ok(Self {
-            sound,
-            // pathbuf: path.to_path_buf(),
-        })
+
+        // create fmod sound exinfo, we want to load the sound from memory
+        let mut exinfo: FMOD_CREATESOUNDEXINFO = unsafe { std::mem::zeroed() };
+        exinfo.cbsize = std::mem::size_of::<FMOD_CREATESOUNDEXINFO>() as i32;
+        exinfo.numchannels = 2;
+        exinfo.format = FMOD_SOUND_FORMAT_PCMFLOAT;
+        exinfo.defaultfrequency = sound.sample_rate() as i32;
+        exinfo.length = sound.frames.len() as u32 * std::mem::size_of::<f32>() as u32 * 2;
+
+        // create fmod sound
+        let mut fmod_sound: *mut FMOD_SOUND = std::ptr::null_mut();
+        unsafe {
+            // we ignore this error because it doesn't matter if you use the kittyaudio backend
+            let _ = FMOD_System_CreateSound(
+                system,
+                sound.frames.as_ptr() as *const i8,
+                FMOD_OPENMEMORY | FMOD_OPENRAW | FMOD_LOOP_OFF,
+                &mut exinfo,
+                &mut fmod_sound,
+            )
+            .fmod_result()
+            .map_err(|e| log::error!("failed to create fmod sound: {e}"));
+        };
+
+        Ok(Self { sound, fmod_sound })
+    }
+
+    fn free(&mut self) {
+        let _ = unsafe {
+            FMOD_Sound_Release(self.fmod_sound)
+                .fmod_result()
+                .map_err(|e| log::error!("failed to release fmod sound: {e}"))
+        };
+        self.fmod_sound = std::ptr::null_mut();
     }
 }
 
@@ -288,7 +319,7 @@ pub struct PlayerClicks {
     pub microreleases: Vec<SoundWrapper>,
 }
 
-fn read_clicks_in_directory(dir: &Path) -> Vec<SoundWrapper> {
+fn read_clicks_in_directory(dir: &Path, system: *mut FMOD_SYSTEM) -> Vec<SoundWrapper> {
     let Ok(dir) = dir.read_dir() else {
         // log::warn!("can't find directory {dir:?}, skipping");
         return vec![];
@@ -297,7 +328,7 @@ fn read_clicks_in_directory(dir: &Path) -> Vec<SoundWrapper> {
     for entry in dir {
         let path = entry.unwrap().path();
         if path.is_file() {
-            let sound = SoundWrapper::from_path(&path);
+            let sound = SoundWrapper::from_path(system, &path);
             if let Ok(sound) = sound {
                 sounds.push(sound);
             } else if let Err(e) = sound {
@@ -309,7 +340,7 @@ fn read_clicks_in_directory(dir: &Path) -> Vec<SoundWrapper> {
 }
 
 impl PlayerClicks {
-    fn load_from_subdirs(&mut self, path: &Path) {
+    fn load_from_subdirs(&mut self, path: &Path, system: *mut FMOD_SYSTEM) {
         let Ok(dir) = path
             .read_dir()
             .map_err(|e| log::warn!("failed to read directory {path:?}: {e}"))
@@ -320,12 +351,12 @@ impl PlayerClicks {
             let Ok(entry) = entry.map_err(|e| log::warn!("error in directory entry: {e}")) else {
                 continue;
             };
-            self.load_from_dir(&entry.path())
+            self.load_from_dir(&entry.path(), system)
         }
     }
 
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
-    fn load_from_dir(&mut self, path: &Path) {
+    fn load_from_dir(&mut self, path: &Path, system: *mut FMOD_SYSTEM) {
         log::debug!("trying to match directory {:?}", path);
         if path.is_file() {
             log::debug!("skipping matching file {:?}", path);
@@ -354,7 +385,7 @@ impl PlayerClicks {
             if pats.iter().any(|pat| *pat == filename) {
                 log::debug!("directory {path:?} matched patterns {pats:?}");
                 matched_any = true;
-                *clicks = read_clicks_in_directory(path);
+                *clicks = read_clicks_in_directory(path, system);
             }
         }
         if !matched_any {
@@ -512,18 +543,19 @@ fn find_noise_file(dir: &Path) -> Option<PathBuf> {
 }
 
 impl Clickpack {
-    fn load_noise(&mut self, dir: &Path) {
+    fn load_noise(&mut self, dir: &Path, system: *mut FMOD_SYSTEM) {
         let Some(path) = find_noise_file(dir) else {
             return;
         };
         // try to load noise
-        self.noise = SoundWrapper::from_path(/*self.system*/ &path).ok();
+        self.noise = SoundWrapper::from_path(system, &path).ok();
     }
 
     pub fn load_from_path(
         &mut self,
         clickpack_dir: &Path,
         load_for: LoadClickpackFor,
+        system: *mut FMOD_SYSTEM,
     ) -> Result<()> {
         log::info!("loading clickpack from path {clickpack_dir:?} for {load_for:?}");
         self.path = clickpack_dir.to_path_buf();
@@ -557,26 +589,26 @@ impl Clickpack {
             path.push(dir);
             log::debug!("loading from dir {path:?}");
 
-            sounds.load_from_subdirs(&path);
+            sounds.load_from_subdirs(&path, system);
             if load_for != LoadClickpackFor::All && sounds.num_sounds() == 0 {
                 log::warn!("directory {dir:?} was not found or has no clicks, assuming there isn't a subdirectory");
-                sounds.load_from_subdirs(clickpack_dir);
+                sounds.load_from_subdirs(clickpack_dir, system);
             }
 
             // try to load noise from the sound directories
             if self.noise.is_none() {
-                self.load_noise(&path);
+                self.load_noise(&path, system);
             }
         }
 
         if !self.has_clicks() {
             log::warn!("folders {CLICKPACK_DIRNAMES:?} were not found in the clickpack, assuming there is only one player");
-            self[0].load_from_subdirs(clickpack_dir);
+            self[0].load_from_subdirs(clickpack_dir, system);
         }
 
         // try to load noise from the root clickpack dir
         if self.noise.is_none() {
-            self.load_noise(clickpack_dir);
+            self.load_noise(clickpack_dir, system);
         }
 
         self.num_sounds = self.num_sounds();
@@ -699,5 +731,36 @@ impl Clickpack {
     #[inline]
     pub const fn has_noise(&self) -> bool {
         self.noise.is_some()
+    }
+}
+
+impl Drop for Clickpack {
+    fn drop(&mut self) {
+        if let Some(mut noise) = self.noise.take() {
+            noise.free();
+        }
+        for sounds in [
+            &mut self.player1,
+            &mut self.player2,
+            &mut self.left1,
+            &mut self.right1,
+            &mut self.left2,
+            &mut self.right2,
+        ] {
+            for clicks in [
+                &mut sounds.hardclicks,
+                &mut sounds.hardreleases,
+                &mut sounds.clicks,
+                &mut sounds.releases,
+                &mut sounds.softclicks,
+                &mut sounds.softreleases,
+                &mut sounds.microclicks,
+                &mut sounds.microreleases,
+            ] {
+                for sound in clicks {
+                    sound.free();
+                }
+            }
+        }
     }
 }

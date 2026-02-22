@@ -11,6 +11,7 @@ crate-type = ["staticlib"] # `cdylib` for DLL, `staticlib` for Geode
 lto = "fat"
 codegen-units = 1
 strip = true
+#debug = true
 
 [workspace]
 members = [".", "egui_gl_hook", "gfmod"]
@@ -47,7 +48,7 @@ egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git"
 ureq = "2.10.1"
 egui-notify = "0.14.0"
 parking_lot = "0.12.2"
-# gfmod = { path = "gfmod" }
+gfmod = { path = "gfmod" }
 
 [build-dependencies]
 built = "0.7.5"

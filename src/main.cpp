@@ -1,3 +1,4 @@
+#include "fmod.h"
 #include <Geode/Geode.hpp>
 #include <Geode/modify/CCEGLView.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
@@ -36,6 +37,11 @@ using namespace geode::prelude;
 
 // define the Rust library API (libzcblive is statically linked into the DLL)
 extern "C" {
+typedef struct {
+    void (*extra_driver_data)();
+} FMODFns;
+
+void zcblive_set_fmod_callbacks(FMODFns fmod_fns);
 void zcblive_on_wgl_swap_buffers(HDC hdc);
 void zcblive_initialize();
 void zcblive_uninitialize();
@@ -85,6 +91,10 @@ void onUnload() {
 
 $on_mod(Loaded) {
     // takes panic hook, calls Bot::init
+    // auto fmod_fns = FMODFns{
+    //    .extra_driver_data = FMODAudioEngine::getActiveMusicChannel(1),
+    //};
+    // zcblive_set_fmod_callbacks(fmod_fns);
     zcblive_initialize();
     std::atexit(onUnload);
 }
@@ -156,7 +166,7 @@ class $modify(GJBaseGameLayer) {
 		if (!is_invalid) {
 			handleAction(button, player1, push, playLayer);
 		}
-		
+
 		GJBaseGameLayer::handleButton(push, button, player1);
 	}
 
