@@ -1,9 +1,9 @@
 {
-	"geode": "4.0.1",
+	"geode": "5.4.1",
 	"gd": {
-		"win": "2.2074"
+		"win": "2.2081"
 	},
-	"version": "v1.0.3",
+	"version": "v1.1.0",
 	"id": "zeozeozeo.zcblive",
 	"name": "ZCB Live",
 	"developer": "zeozeozeo",
