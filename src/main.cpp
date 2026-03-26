@@ -151,6 +151,13 @@ class $modify(PlayerObject) {
 };
 
 class $modify(GJBaseGameLayer) {
+	void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+		bool lastDied = m_playerDied;
+		m_playerDied = false;
+		GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+		m_playerDied = lastDied;
+	}
+
 	void handleButton(bool push, int button, bool player1) {
 		if (zcblive_do_use_alternate_hook()) {
 			GJBaseGameLayer::handleButton(push, button, player1);
@@ -161,8 +168,8 @@ class $modify(GJBaseGameLayer) {
 
 		auto playLayer = PlayLayer::get();
 		bool is_invalid = playLayer && ((button == 2 || button == 3)
-                        && !(player1 && playLayer->m_player1->m_isPlatformer)
-                        && !(!player1 && playLayer->m_player2->m_isPlatformer));
+				&& !(player1 && playLayer->m_player1->m_isPlatformer)
+				&& !(!player1 && playLayer->m_player2->m_isPlatformer));
 		if (!is_invalid) {
 			handleAction(button, player1, push, playLayer);
 		}

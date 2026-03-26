@@ -294,8 +294,6 @@ pub struct Config {
     pub decouple_platformer: bool,
     #[serde(default = "true_value")]
     pub autosave_config: bool,
-    #[serde(default = "true_value")]
-    pub release_buttons_on_death: bool,
     #[serde(default = "death_release_delay_default")]
     pub death_release_delay: f64,
     #[serde(default = "death_release_delay_offset_default")]
@@ -356,7 +354,6 @@ impl Default for Config {
             load_clickpack_for: LoadClickpackFor::All,
             decouple_platformer: false,
             autosave_config: true,
-            release_buttons_on_death: true,
             death_release_delay: death_release_delay_default(),
             death_release_delay_offset: death_release_delay_offset_default(),
             death_release_delay_neg: false,
@@ -893,26 +890,9 @@ impl Bot {
         self.dead_timer = f32::NAN;
     }
 
-    unsafe fn release_buttons(&mut self) {
-        log::info!("releasing buttons on death");
-        for (button, t) in [
-            (Button::Jump, self.prev_times.jump),
-            (Button::Left, self.prev_times.left),
-            (Button::Right, self.prev_times.right),
-        ] {
-            for (player, time) in t.iter().enumerate() {
-                if time.typ.is_click() && time.time != 0.0 {
-                    self.on_action(button, player == 1, false);
-                }
-            }
-        }
-    }
-
     pub unsafe fn on_death(&mut self) {
-        if !self.conf.release_buttons_on_death {
-            return;
-        }
-
+        // nop for now
+        /*
         let mut release_delay = self.conf.death_release_delay;
         let offset = self.conf.death_release_delay_offset;
 
@@ -934,9 +914,12 @@ impl Bot {
             self.dead_timer_limit = release_delay as f32;
             self.dead_timer = 0.0;
         }
+        */
     }
 
-    pub unsafe fn on_update(&mut self, dt: f32) {
+    pub unsafe fn on_update(&mut self, _dt: f32) {
+        // nop for now
+        /*
         if !self.dead_timer.is_nan() {
             self.dead_timer += dt;
             if self.dead_timer >= self.dead_timer_limit {
@@ -944,6 +927,7 @@ impl Bot {
                 self.release_buttons();
             }
         }
+        */
     }
 
     #[allow(unused_mut)]
@@ -975,7 +959,7 @@ impl Bot {
         let prev_time =
             self.prev_times
                 .get_prev_time(button, player2, self.conf.decouple_platformer);
-        if prev_time.typ.is_click() && push {
+        if prev_time.typ.is_click() == push {
             return;
         }
         let dt = (now - prev_time.time).abs();
@@ -1695,31 +1679,6 @@ impl Bot {
                     );
                 },
             );
-            help_text(ui, "Releases all held buttons on death", |ui| {
-                ui.checkbox(
-                    &mut self.conf.release_buttons_on_death,
-                    "Release buttons on death",
-                );
-            });
-            if self.conf.release_buttons_on_death {
-                drag_value(
-                    ui,
-                    &mut self.conf.death_release_delay,
-                    "Release delay (sec)",
-                    0.0..=f64::INFINITY,
-                    "Delay before releasing buttons on death in seconds",
-                );
-                ui.horizontal(|ui| {
-                    drag_value(
-                        ui,
-                        &mut self.conf.death_release_delay_offset,
-                        "+/- (sec)",
-                        0.0..=f64::INFINITY,
-                        "Random offset for the death release delay in seconds",
-                    );
-                    ui.checkbox(&mut self.conf.death_release_delay_neg, "Negative?");
-                });
-            }
 
             ui.separator();
 
