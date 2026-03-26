@@ -105,7 +105,7 @@ template <class R, class T> inline R& from(T base, intptr_t offset) {
 
 inline double getTime() {
     auto playLayer = PlayLayer::get();
-    return playLayer ? from<double>(playLayer, 968) : 0.0;
+    return playLayer ? playLayer->m_currentTime : 0.0;
 }
 
 void handleAction(int button, bool player1, bool push, PlayLayer* playLayer) {
