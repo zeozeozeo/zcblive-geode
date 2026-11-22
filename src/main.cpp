@@ -34,6 +34,8 @@ using namespace geode::prelude;
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "kernel32.lib")
+// newer Rust std uses WaitOnAddress/WakeByAddress* for its locks
+#pragma comment(lib, "synchronization.lib")
 
 // define the Rust library API (libzcblive is statically linked into the DLL)
 extern "C" {
