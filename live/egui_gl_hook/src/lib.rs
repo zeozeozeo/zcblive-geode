@@ -3,6 +3,7 @@
 use clipboard::{windows_clipboard::WindowsClipboardContext, ClipboardProvider};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 mod gl_state;
 use gl_state::{GetVertexAttribIv, GlState};
@@ -84,6 +85,12 @@ struct EguiState {
     new_gl_context: HGLRC,
     is_changing_scale: bool,
     prev_scale: f32,
+    /// meshes from the last UI run, drawn again on frames where the UI isn't re-run
+    last_primitives: Vec<egui::ClippedPrimitive>,
+    last_pixels_per_point: f32,
+    last_screen_size: (u32, u32),
+    /// when the UI should next be re-run even without input
+    next_run: Instant,
 }
 
 static mut STATE: Option<EguiState> = None; // unsafe, sure, but also way easier to make work
@@ -234,12 +241,25 @@ pub unsafe fn init(window_handle: HDC, mode: GlMode) -> Result<(), Error> {
         new_gl_context,
         is_changing_scale: false,
         prev_scale: 1.0,
+        last_primitives: Vec::new(),
+        last_pixels_per_point: 1.0,
+        last_screen_size: (0, 0),
+        next_run: Instant::now(),
     });
 
     Ok(())
 }
 
-/// runs ui function and makes opengl calls to render to specified window
+/// when nothing is happening (no input, no animation), still run the UI this often so
+/// timers inside it (toasts, autosave, clickpack reloads) keep ticking
+const IDLE_RUN_INTERVAL: Duration = Duration::from_millis(100);
+
+/// runs ui function and makes opengl calls to render to specified window.
+///
+/// to keep the per-frame cost low (this runs on every game frame), the UI is only re-run
+/// when there is input, egui asked for a repaint, the window was resized, or
+/// [`IDLE_RUN_INTERVAL`] passed; otherwise the previous frame's meshes are drawn again.
+/// when there is nothing to draw at all (menu hidden, no toasts), no GL calls are made.
 pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(), Error> {
     let state = unsafe {
         match &mut STATE {
@@ -249,6 +269,18 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
     };
 
     state.window_handle = hdc;
+    let screen_size = get_screen_size()?;
+    let now = Instant::now();
+
+    let mut textures_delta = egui::TexturesDelta::default();
+    if !state.events.is_empty() || screen_size != state.last_screen_size || now >= state.next_run {
+        textures_delta = run_ui(state, run_fn, screen_size);
+        state.last_screen_size = screen_size;
+    }
+
+    if state.last_primitives.is_empty() && textures_delta.is_empty() {
+        return Ok(()); // nothing visible: leave the game's GL state alone
+    }
 
     let saved = match state.mode {
         GlMode::Separate => {
@@ -266,7 +298,18 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
             state.get_vertex_attrib_iv,
         )),
     };
-    let result = paint_inner(state, run_fn);
+
+    for (id, image_delta) in &textures_delta.set {
+        state.painter.set_texture(*id, image_delta);
+    }
+    state.painter.paint_primitives(
+        [screen_size.0, screen_size.1],
+        state.last_pixels_per_point,
+        &state.last_primitives,
+    ); // actual opengl calls to render
+    for id in textures_delta.free.drain(..) {
+        state.painter.free_texture(id);
+    }
 
     match saved {
         Some(saved) => saved.restore(&state.gl),
@@ -277,27 +320,23 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
         }
     }
 
-    result
+    Ok(())
 }
 
-unsafe fn paint_inner(
+/// runs the UI (CPU only, no GL), stores the tessellated meshes and returns texture changes
+unsafe fn run_ui(
     state: &mut EguiState,
     run_fn: Box<dyn Fn(&egui::Context)>,
-) -> Result<(), Error> {
-
-    let raw_input = get_raw_input(state)?;
-    // let dpi = match GetDpiForWindow(WindowFromDC(state.window_handle)) {
-    //     0 => 96.0,
-    //     dpi => dpi as f32,
-    // };
-    // let pixels_per_point = dpi / 96.0;
+    screen_size: (u32, u32),
+) -> egui::TexturesDelta {
+    let raw_input = get_raw_input(state, screen_size);
 
     let egui::FullOutput {
         platform_output,
-        mut textures_delta,
+        textures_delta,
         shapes,
         pixels_per_point,
-        viewport_output: _,
+        viewport_output,
     } = state.egui_ctx.run(raw_input, &*run_fn); // run through ui and get output
 
     if let Some(open_url) = platform_output.open_url {
@@ -314,25 +353,17 @@ unsafe fn paint_inner(
             });
     }
 
-    for (id, image_delta) in textures_delta.set {
-        state.painter.set_texture(id, &image_delta);
-    }
-
     // convert to meshes
-    let clipped_primitives = state.egui_ctx.tessellate(shapes, pixels_per_point);
-    let dimensions = get_screen_size()?;
+    state.last_primitives = state.egui_ctx.tessellate(shapes, pixels_per_point);
+    state.last_pixels_per_point = pixels_per_point;
 
-    state.painter.paint_primitives(
-        [dimensions.0, dimensions.1],
-        pixels_per_point,
-        &clipped_primitives,
-    ); // actual opengl calls to render
+    let repaint_delay = viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .map(|v| v.repaint_delay)
+        .unwrap_or(Duration::MAX);
+    state.next_run = Instant::now() + repaint_delay.min(IDLE_RUN_INTERVAL);
 
-    for id in textures_delta.free.drain(..) {
-        state.painter.free_texture(id);
-    }
-
-    Ok(())
+    textures_delta
 }
 
 /// returns if you should skip calling original wndproc
@@ -632,11 +663,18 @@ fn get_clipboard_text() -> Option<String> {
     WindowsClipboardContext.get_contents().ok()
 }
 
-unsafe fn get_raw_input(state: &mut EguiState) -> Result<RawInput, Error> {
-    Ok(RawInput {
+unsafe fn get_raw_input(state: &mut EguiState, screen_size: (u32, u32)) -> RawInput {
+    let zoom_factor = state.egui_ctx.zoom_factor();
+    RawInput {
         modifiers: state.modifiers.unwrap_or_default(),
         events: std::mem::take(&mut state.events),
-        screen_rect: Some(get_screen_rect(state.egui_ctx.zoom_factor())?),
+        screen_rect: Some(Rect {
+            min: Pos2::ZERO,
+            max: Pos2 {
+                x: screen_size.0 as f32 / zoom_factor,
+                y: screen_size.1 as f32 / zoom_factor,
+            },
+        }),
         time: Some(get_system_time()),
         max_texture_side: None,
         predicted_dt: 1.0 / 60.0,
@@ -644,7 +682,7 @@ unsafe fn get_raw_input(state: &mut EguiState) -> Result<RawInput, Error> {
         dropped_files: vec![],
         focused: true,
         ..Default::default()
-    })
+    }
 }
 
 fn get_system_time() -> f64 {
@@ -678,14 +716,3 @@ pub fn get_screen_size() -> Result<(u32, u32), Error> {
     ))
 }
 
-fn get_screen_rect(zoom_factor: f32) -> Result<Rect, Error> {
-    let size = get_screen_size()?;
-
-    Ok(Rect {
-        min: Pos2::ZERO,
-        max: Pos2 {
-            x: size.0 as f32 / zoom_factor,
-            y: size.1 as f32 / zoom_factor,
-        },
-    })
-}

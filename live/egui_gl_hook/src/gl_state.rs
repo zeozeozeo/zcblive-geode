@@ -12,8 +12,9 @@ use std::num::NonZeroU32;
 /// `glGetVertexAttribiv`, which glow doesn't expose.
 pub type GetVertexAttribIv = unsafe extern "system" fn(index: u32, pname: u32, params: *mut i32);
 
-/// how many vertex attribute slots to save. cocos2d uses 0..=2, egui uses 0..=2; 8 is plenty.
-const SAVED_VERTEX_ATTRIBS: usize = 8;
+/// how many vertex attribute slots to save. cocos2d uses 0..=2 and egui uses 0..=2.
+/// each one is a GL call (a Wine thunk) per frame, so keep this small.
+const SAVED_VERTEX_ATTRIBS: usize = 4;
 
 fn nz(v: i32) -> Option<NonZeroU32> {
     NonZeroU32::new(v as u32)

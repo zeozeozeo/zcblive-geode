@@ -724,7 +724,9 @@ impl Bot {
             std::thread::spawn(move || {
                 let mut prev_devices = vec![];
                 loop {
-                    if unsafe { BOT.conf.use_fmod } {
+                    // the device list is only shown in the menu; enumerating audio
+                    // devices is slow under Wine, so skip it while the menu is closed
+                    if unsafe { BOT.conf.use_fmod || BOT.conf.hidden } {
                         // don't spin a core while FMOD is used for playback
                         std::thread::sleep(Duration::from_secs(4));
                         continue;
