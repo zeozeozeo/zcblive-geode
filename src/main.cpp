@@ -42,6 +42,7 @@ typedef struct {
 } FMODFns;
 
 void zcblive_set_fmod_callbacks(FMODFns fmod_fns);
+void zcblive_set_log_callback(void (*cb)(uint8_t level, const char* msg));
 void zcblive_on_wgl_swap_buffers(HDC hdc);
 void zcblive_initialize();
 void zcblive_uninitialize();
@@ -89,7 +90,18 @@ void onUnload() {
     zcblive_uninitialize();
 }
 
+// forwards logs from the Rust side into Geode's log file
+static void zcbliveLog(uint8_t level, const char* msg) {
+    switch (level) {
+    case 0: log::error("{}", msg); break;
+    case 1: log::warn("{}", msg); break;
+    case 2: log::info("{}", msg); break;
+    default: log::debug("{}", msg); break;
+    }
+}
+
 $on_mod(Loaded) {
+    zcblive_set_log_callback(zcbliveLog);
     // takes panic hook, calls Bot::init
     // auto fmod_fns = FMODFns{
     //    .extra_driver_data = FMODAudioEngine::getActiveMusicChannel(1),

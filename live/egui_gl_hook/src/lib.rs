@@ -3,6 +3,9 @@
 use clipboard::{windows_clipboard::WindowsClipboardContext, ClipboardProvider};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::sync::Arc;
+
+mod gl_state;
+use gl_state::{GetVertexAttribIv, GlState};
 use windows::{
     Wdk::System::SystemInformation::NtQuerySystemTime,
     Win32::{
@@ -22,9 +25,58 @@ use windows::{
     },
 };
 
+/// How the overlay gets a GL context to draw with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlMode {
+    /// create our own context and switch to it (with `wglMakeCurrent`) every frame.
+    /// this is what has always been done on Windows.
+    Separate,
+    /// draw inside the game's current context, saving and restoring the GL state we touch.
+    /// used under Wine (CrossOver, Whisky, Proton...), where switching contexts on the
+    /// game's window every frame breaks presentation (on macOS the window stops showing).
+    Shared,
+}
+
+impl GlMode {
+    /// picks the mode for this machine. `ZCBLIVE_GL_MODE=shared|separate` overrides it.
+    pub fn detect() -> Self {
+        match std::env::var("ZCBLIVE_GL_MODE")
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref()
+        {
+            Ok("shared") => return Self::Shared,
+            Ok("separate") => return Self::Separate,
+            _ => {}
+        }
+        if wine_version().is_some() {
+            Self::Shared
+        } else {
+            Self::Separate
+        }
+    }
+}
+
+/// returns the Wine version if running under Wine (or something based on it, like CrossOver)
+pub fn wine_version() -> Option<String> {
+    unsafe {
+        let ntdll = GetModuleHandleA(windows::core::s!("ntdll.dll")).ok()?;
+        let f = GetProcAddress(ntdll, windows::core::s!("wine_get_version"))?;
+        let f: unsafe extern "C" fn() -> *const std::ffi::c_char = std::mem::transmute(f);
+        let ptr = f();
+        if ptr.is_null() {
+            return Some("unknown".to_string());
+        }
+        Some(std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned())
+    }
+}
+
 struct EguiState {
     egui_ctx: egui::Context,
     painter: egui_glow::Painter,
+    gl: Arc<egui_glow::glow::Context>,
+    mode: GlMode,
+    has_vao: bool,
+    get_vertex_attrib_iv: Option<GetVertexAttribIv>,
     events: Vec<egui::Event>,
     modifiers: Option<Modifiers>,
     window_handle: HDC,
@@ -82,8 +134,10 @@ pub fn destroy() -> Result<(), Error> {
         }
     };
 
-    unsafe {
-        let _ = wglDeleteContext(state.new_gl_context);
+    if state.mode == GlMode::Separate {
+        unsafe {
+            let _ = wglDeleteContext(state.new_gl_context);
+        }
     }
 
     state.painter.destroy();
@@ -97,52 +151,82 @@ pub fn is_init() -> bool {
 }
 
 /// initializes state; needed to be called before paint, on_event, get_window_rect, and destroy
-pub unsafe fn init(window_handle: HDC) -> Result<(), Error> {
+/// looks up a GL function, first with `wglGetProcAddress`, then in opengl32.dll
+unsafe fn gl_proc_address(name: &std::ffi::CStr) -> *const std::ffi::c_void {
+    let name = windows::core::PCSTR::from_raw(name.as_ptr() as _);
+    if let Some(f) = wglGetProcAddress(name) {
+        return f as *const _;
+    }
+    // if that fails, use normal GetProcAddress (yes this is necessary)
+    match GetModuleHandleA(windows::core::s!("OPENGL32.dll")) {
+        Ok(opengl32) => GetProcAddress(opengl32, name)
+            .map(|f| f as *const std::ffi::c_void)
+            .unwrap_or(std::ptr::null()),
+        Err(_) => std::ptr::null(),
+    }
+}
+
+/// initializes state; needed to be called before paint, on_event, get_window_rect, and destroy
+pub unsafe fn init(window_handle: HDC, mode: GlMode) -> Result<(), Error> {
     if is_init() {
         return Err(Error::AlreadyInit);
     };
 
     let original_gl_context = wglGetCurrentContext();
-    let new_gl_context = match wglCreateContext(window_handle) {
-        Ok(gl) => gl,
-        Err(_) => return Err(Error::CtxCreate),
+    let new_gl_context = match mode {
+        // draw with the game's own context
+        GlMode::Shared => original_gl_context,
+        GlMode::Separate => match wglCreateContext(window_handle) {
+            Ok(gl) => gl,
+            Err(_) => return Err(Error::CtxCreate),
+        },
     };
 
     // not sure if you need to change the gl context for initialization, but it doesn't hurt right?
-    if wglMakeCurrent(window_handle, new_gl_context).is_err() {
+    if mode == GlMode::Separate && wglMakeCurrent(window_handle, new_gl_context).is_err() {
+        let _ = wglDeleteContext(new_gl_context);
         return Err(Error::CtxSwitch);
     }
 
     let gl = Arc::new(unsafe {
-        egui_glow::glow::Context::from_loader_function_cstr(|s| {
-            let result = wglGetProcAddress(windows::core::PCSTR::from_raw(s.as_ptr() as _));
-            if result.is_some() {
-                // first, check wglGetProcAddress
-                std::mem::transmute(result)
-            } else {
-                // if that fails, use normal GetProcAddress (yes this is necessary)
-                std::mem::transmute(GetProcAddress(
-                    GetModuleHandleA(windows::core::s!("OPENGL32.dll")).unwrap(), // idc im using unwrap here
-                    windows::core::PCSTR::from_raw(s.as_ptr() as _),
-                ))
-            }
-        })
+        egui_glow::glow::Context::from_loader_function_cstr(|s| gl_proc_address(s))
     });
+    let has_vao = gl_state::supports_vao(&gl);
+    let get_vertex_attrib_iv = {
+        let f = gl_proc_address(c"glGetVertexAttribiv");
+        (!f.is_null()).then(|| std::mem::transmute::<_, GetVertexAttribIv>(f))
+    };
 
-    let painter = match egui_glow::Painter::new(gl, "", None) {
+    // in shared mode, painter creation binds buffers/textures in the game's context too
+    let saved = (mode == GlMode::Shared).then(|| GlState::save(&gl, has_vao, get_vertex_attrib_iv));
+    let painter = egui_glow::Painter::new(gl.clone(), "", None);
+    if let Some(saved) = &saved {
+        saved.restore(&gl);
+    }
+
+    if mode == GlMode::Separate {
+        let _ = wglMakeCurrent(window_handle, original_gl_context);
+    }
+
+    let painter = match painter {
         Ok(p) => p,
-        Err(err) => return Err(err.into()),
+        Err(err) => {
+            if mode == GlMode::Separate {
+                let _ = wglDeleteContext(new_gl_context);
+            }
+            return Err(err.into());
+        }
     };
 
     let egui_ctx = egui::Context::default();
 
-    if wglMakeCurrent(window_handle, original_gl_context).is_err() {
-        return Err(Error::CtxSwitch);
-    }
-
     STATE = Some(EguiState {
         egui_ctx,
         painter,
+        gl,
+        mode,
+        has_vao,
+        get_vertex_attrib_iv,
         events: Vec::new(),
         modifiers: None,
         window_handle,
@@ -164,15 +248,42 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
         }
     };
 
-    if state.window_handle != hdc {
-        state.original_gl_context = wglGetCurrentContext();
-    }
-
     state.window_handle = hdc;
 
-    if wglMakeCurrent(state.window_handle, state.new_gl_context).is_err() {
-        return Err(Error::CtxSwitch);
+    let saved = match state.mode {
+        GlMode::Separate => {
+            // always remember the game's context, it may have been recreated
+            // (e.g. after toggling fullscreen)
+            state.original_gl_context = wglGetCurrentContext();
+            if wglMakeCurrent(state.window_handle, state.new_gl_context).is_err() {
+                return Err(Error::CtxSwitch);
+            }
+            None
+        }
+        GlMode::Shared => Some(GlState::save(
+            &state.gl,
+            state.has_vao,
+            state.get_vertex_attrib_iv,
+        )),
+    };
+    let result = paint_inner(state, run_fn);
+
+    match saved {
+        Some(saved) => saved.restore(&state.gl),
+        None => {
+            if wglMakeCurrent(state.window_handle, state.original_gl_context).is_err() {
+                return Err(Error::CtxSwitch);
+            }
+        }
     }
+
+    result
+}
+
+unsafe fn paint_inner(
+    state: &mut EguiState,
+    run_fn: Box<dyn Fn(&egui::Context)>,
+) -> Result<(), Error> {
 
     let raw_input = get_raw_input(state)?;
     // let dpi = match GetDpiForWindow(WindowFromDC(state.window_handle)) {
@@ -219,10 +330,6 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
 
     for id in textures_delta.free.drain(..) {
         state.painter.free_texture(id);
-    }
-
-    if wglMakeCurrent(state.window_handle, state.original_gl_context).is_err() {
-        return Err(Error::CtxSwitch);
     }
 
     Ok(())

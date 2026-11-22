@@ -725,6 +725,8 @@ impl Bot {
                 let mut prev_devices = vec![];
                 loop {
                     if unsafe { BOT.conf.use_fmod } {
+                        // don't spin a core while FMOD is used for playback
+                        std::thread::sleep(Duration::from_secs(4));
                         continue;
                     }
                     if let Ok(devices) = kittyaudio::device_names() {
