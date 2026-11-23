@@ -38,8 +38,9 @@ jobs:
       - name: Build the mod
         uses: geode-sdk/build-geode-mod@main
         with:
-          bindings: geode-sdk/bindings
-          bindings-ref: main
+          # pin the SDK to the version in mod.json (older tags have a broken
+          # CCFileUtilsWin32.h that no longer compiles against current bindings)
+          sdk: v5.11.2
           combine: true
           target: ${{ matrix.config.target }}
 

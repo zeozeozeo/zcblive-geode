@@ -111,12 +111,29 @@ unsafe extern "C" fn zcblive_on_wgl_swap_buffers(hdc: HDC) {
         log::info!("wglSwapBuffers hooked");
     });
 
+    // set if the overlay failed to start; we then leave the game alone for good
+    static mut OVERLAY_DISABLED: bool = false;
+
     unsafe {
+        if OVERLAY_DISABLED || hdc.is_invalid() {
+            return;
+        }
+
         // initialize egui_gl_hook
         if !egui_gl_hook::is_init() {
+            let mode = egui_gl_hook::GlMode::detect();
+            match egui_gl_hook::wine_version() {
+                Some(v) => log::info!("running under Wine {v}, overlay GL mode: {mode:?}"),
+                None => log::info!("overlay GL mode: {mode:?}"),
+            }
+            if let Err(e) = egui_gl_hook::init(hdc, mode) {
+                log::error!("failed to start the overlay, disabling it: {e}");
+                OVERLAY_DISABLED = true;
+                return;
+            }
+            log::info!("overlay initialized");
             let hwnd = WindowFromDC(hdc);
             O_WNDPROC = Some(SetWindowLongPtrA(hwnd, GWLP_WNDPROC, h_wndproc as isize));
-            egui_gl_hook::init(hdc).unwrap();
         }
 
         // paint this frame
@@ -155,20 +172,32 @@ unsafe extern "system" fn zcblive_main(_hmod: *mut c_void) -> u32 {
 
 #[no_mangle]
 unsafe extern "C" fn zcblive_initialize() {
-    // wait for enter key on panics
-    let panic_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info: &std::panic::PanicInfo<'_>| {
-        panic_hook(info);
-        let mut string = String::new();
-        std::io::stdin().read_line(&mut string).unwrap();
-        std::process::exit(1);
+    // wait for enter key on panics (standalone DLL only: it has its own console.
+    // the Geode build has no console to read from, so just log the panic)
+    #[cfg(not(feature = "geode"))]
+    {
+        let panic_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info: &std::panic::PanicInfo<'_>| {
+            panic_hook(info);
+            let mut string = String::new();
+            let _ = std::io::stdin().read_line(&mut string);
+            std::process::exit(1);
+        }));
+    }
+    #[cfg(feature = "geode")]
+    std::panic::set_hook(Box::new(|info: &std::panic::PanicHookInfo<'_>| {
+        log::error!("panic: {info}");
     }));
 
     #[cfg(not(feature = "geode"))]
     BOT.maybe_alloc_console();
 
+    // the Geode side registers a callback so our logs land in Geode's log file;
+    // fall back to stdout otherwise
     #[cfg(feature = "geode")]
-    let _ = simple_logger::SimpleLogger::new().init();
+    if { LOG_CALLBACK }.is_none() {
+        let _ = simple_logger::SimpleLogger::new().init();
+    }
 
     #[cfg(not(feature = "geode"))]
     init_gl_hook();
@@ -290,4 +319,53 @@ impl Default for FMODFns {
 #[no_mangle]
 unsafe extern "C" fn zcblive_set_fmod_callbacks(fmod_fns: FMODFns) {
     //BOT.fmod_fns = fmod_fns;
+}
+
+// logging into Geode's log
+
+/// `level`: 0 = error, 1 = warn, 2 = info, 3 = debug/trace. `msg` is NUL-terminated UTF-8.
+pub type LogCallback = unsafe extern "C" fn(level: u8, msg: *const std::ffi::c_char);
+
+static mut LOG_CALLBACK: Option<LogCallback> = None;
+
+struct CallbackLogger;
+
+impl log::Log for CallbackLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        // only our own crates; dependencies are far too chatty for Geode's log
+        metadata.level() <= log::Level::Debug
+            && (metadata.target().starts_with("zcblive")
+                || metadata.target().starts_with("egui_gl_hook"))
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let Some(cb) = (unsafe { LOG_CALLBACK }) else {
+            return;
+        };
+        let level = match record.level() {
+            log::Level::Error => 0,
+            log::Level::Warn => 1,
+            log::Level::Info => 2,
+            _ => 3,
+        };
+        let msg = format!("{}", record.args()).replace('\0', "");
+        if let Ok(msg) = std::ffi::CString::new(msg) {
+            unsafe { cb(level, msg.as_ptr()) };
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// call before `zcblive_initialize` to send logs to Geode's log
+#[no_mangle]
+unsafe extern "C" fn zcblive_set_log_callback(cb: LogCallback) {
+    LOG_CALLBACK = Some(cb);
+    static LOGGER: CallbackLogger = CallbackLogger;
+    if log::set_logger(&LOGGER).is_ok() {
+        log::set_max_level(log::LevelFilter::Debug);
+    }
 }

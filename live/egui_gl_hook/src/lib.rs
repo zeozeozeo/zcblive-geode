@@ -3,6 +3,10 @@
 use clipboard::{windows_clipboard::WindowsClipboardContext, ClipboardProvider};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+mod gl_state;
+use gl_state::{GetVertexAttribIv, GlState};
 use windows::{
     Wdk::System::SystemInformation::NtQuerySystemTime,
     Win32::{
@@ -22,9 +26,58 @@ use windows::{
     },
 };
 
+/// How the overlay gets a GL context to draw with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlMode {
+    /// create our own context and switch to it (with `wglMakeCurrent`) every frame.
+    /// this is what has always been done on Windows.
+    Separate,
+    /// draw inside the game's current context, saving and restoring the GL state we touch.
+    /// used under Wine (CrossOver, Whisky, Proton...), where switching contexts on the
+    /// game's window every frame breaks presentation (on macOS the window stops showing).
+    Shared,
+}
+
+impl GlMode {
+    /// picks the mode for this machine. `ZCBLIVE_GL_MODE=shared|separate` overrides it.
+    pub fn detect() -> Self {
+        match std::env::var("ZCBLIVE_GL_MODE")
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref()
+        {
+            Ok("shared") => return Self::Shared,
+            Ok("separate") => return Self::Separate,
+            _ => {}
+        }
+        if wine_version().is_some() {
+            Self::Shared
+        } else {
+            Self::Separate
+        }
+    }
+}
+
+/// returns the Wine version if running under Wine (or something based on it, like CrossOver)
+pub fn wine_version() -> Option<String> {
+    unsafe {
+        let ntdll = GetModuleHandleA(windows::core::s!("ntdll.dll")).ok()?;
+        let f = GetProcAddress(ntdll, windows::core::s!("wine_get_version"))?;
+        let f: unsafe extern "C" fn() -> *const std::ffi::c_char = std::mem::transmute(f);
+        let ptr = f();
+        if ptr.is_null() {
+            return Some("unknown".to_string());
+        }
+        Some(std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned())
+    }
+}
+
 struct EguiState {
     egui_ctx: egui::Context,
     painter: egui_glow::Painter,
+    gl: Arc<egui_glow::glow::Context>,
+    mode: GlMode,
+    has_vao: bool,
+    get_vertex_attrib_iv: Option<GetVertexAttribIv>,
     events: Vec<egui::Event>,
     modifiers: Option<Modifiers>,
     window_handle: HDC,
@@ -32,6 +85,12 @@ struct EguiState {
     new_gl_context: HGLRC,
     is_changing_scale: bool,
     prev_scale: f32,
+    /// meshes from the last UI run, drawn again on frames where the UI isn't re-run
+    last_primitives: Vec<egui::ClippedPrimitive>,
+    last_pixels_per_point: f32,
+    last_screen_size: (u32, u32),
+    /// when the UI should next be re-run even without input
+    next_run: Instant,
 }
 
 static mut STATE: Option<EguiState> = None; // unsafe, sure, but also way easier to make work
@@ -82,8 +141,10 @@ pub fn destroy() -> Result<(), Error> {
         }
     };
 
-    unsafe {
-        let _ = wglDeleteContext(state.new_gl_context);
+    if state.mode == GlMode::Separate {
+        unsafe {
+            let _ = wglDeleteContext(state.new_gl_context);
+        }
     }
 
     state.painter.destroy();
@@ -97,52 +158,82 @@ pub fn is_init() -> bool {
 }
 
 /// initializes state; needed to be called before paint, on_event, get_window_rect, and destroy
-pub unsafe fn init(window_handle: HDC) -> Result<(), Error> {
+/// looks up a GL function, first with `wglGetProcAddress`, then in opengl32.dll
+unsafe fn gl_proc_address(name: &std::ffi::CStr) -> *const std::ffi::c_void {
+    let name = windows::core::PCSTR::from_raw(name.as_ptr() as _);
+    if let Some(f) = wglGetProcAddress(name) {
+        return f as *const _;
+    }
+    // if that fails, use normal GetProcAddress (yes this is necessary)
+    match GetModuleHandleA(windows::core::s!("OPENGL32.dll")) {
+        Ok(opengl32) => GetProcAddress(opengl32, name)
+            .map(|f| f as *const std::ffi::c_void)
+            .unwrap_or(std::ptr::null()),
+        Err(_) => std::ptr::null(),
+    }
+}
+
+/// initializes state; needed to be called before paint, on_event, get_window_rect, and destroy
+pub unsafe fn init(window_handle: HDC, mode: GlMode) -> Result<(), Error> {
     if is_init() {
         return Err(Error::AlreadyInit);
     };
 
     let original_gl_context = wglGetCurrentContext();
-    let new_gl_context = match wglCreateContext(window_handle) {
-        Ok(gl) => gl,
-        Err(_) => return Err(Error::CtxCreate),
+    let new_gl_context = match mode {
+        // draw with the game's own context
+        GlMode::Shared => original_gl_context,
+        GlMode::Separate => match wglCreateContext(window_handle) {
+            Ok(gl) => gl,
+            Err(_) => return Err(Error::CtxCreate),
+        },
     };
 
     // not sure if you need to change the gl context for initialization, but it doesn't hurt right?
-    if wglMakeCurrent(window_handle, new_gl_context).is_err() {
+    if mode == GlMode::Separate && wglMakeCurrent(window_handle, new_gl_context).is_err() {
+        let _ = wglDeleteContext(new_gl_context);
         return Err(Error::CtxSwitch);
     }
 
     let gl = Arc::new(unsafe {
-        egui_glow::glow::Context::from_loader_function_cstr(|s| {
-            let result = wglGetProcAddress(windows::core::PCSTR::from_raw(s.as_ptr() as _));
-            if result.is_some() {
-                // first, check wglGetProcAddress
-                std::mem::transmute(result)
-            } else {
-                // if that fails, use normal GetProcAddress (yes this is necessary)
-                std::mem::transmute(GetProcAddress(
-                    GetModuleHandleA(windows::core::s!("OPENGL32.dll")).unwrap(), // idc im using unwrap here
-                    windows::core::PCSTR::from_raw(s.as_ptr() as _),
-                ))
-            }
-        })
+        egui_glow::glow::Context::from_loader_function_cstr(|s| gl_proc_address(s))
     });
+    let has_vao = gl_state::supports_vao(&gl);
+    let get_vertex_attrib_iv = {
+        let f = gl_proc_address(c"glGetVertexAttribiv");
+        (!f.is_null()).then(|| std::mem::transmute::<_, GetVertexAttribIv>(f))
+    };
 
-    let painter = match egui_glow::Painter::new(gl, "", None) {
+    // in shared mode, painter creation binds buffers/textures in the game's context too
+    let saved = (mode == GlMode::Shared).then(|| GlState::save(&gl, has_vao, get_vertex_attrib_iv));
+    let painter = egui_glow::Painter::new(gl.clone(), "", None);
+    if let Some(saved) = &saved {
+        saved.restore(&gl);
+    }
+
+    if mode == GlMode::Separate {
+        let _ = wglMakeCurrent(window_handle, original_gl_context);
+    }
+
+    let painter = match painter {
         Ok(p) => p,
-        Err(err) => return Err(err.into()),
+        Err(err) => {
+            if mode == GlMode::Separate {
+                let _ = wglDeleteContext(new_gl_context);
+            }
+            return Err(err.into());
+        }
     };
 
     let egui_ctx = egui::Context::default();
 
-    if wglMakeCurrent(window_handle, original_gl_context).is_err() {
-        return Err(Error::CtxSwitch);
-    }
-
     STATE = Some(EguiState {
         egui_ctx,
         painter,
+        gl,
+        mode,
+        has_vao,
+        get_vertex_attrib_iv,
         events: Vec::new(),
         modifiers: None,
         window_handle,
@@ -150,12 +241,25 @@ pub unsafe fn init(window_handle: HDC) -> Result<(), Error> {
         new_gl_context,
         is_changing_scale: false,
         prev_scale: 1.0,
+        last_primitives: Vec::new(),
+        last_pixels_per_point: 1.0,
+        last_screen_size: (0, 0),
+        next_run: Instant::now(),
     });
 
     Ok(())
 }
 
-/// runs ui function and makes opengl calls to render to specified window
+/// when nothing is happening (no input, no animation), still run the UI this often so
+/// timers inside it (toasts, autosave, clickpack reloads) keep ticking
+const IDLE_RUN_INTERVAL: Duration = Duration::from_millis(100);
+
+/// runs ui function and makes opengl calls to render to specified window.
+///
+/// to keep the per-frame cost low (this runs on every game frame), the UI is only re-run
+/// when there is input, egui asked for a repaint, the window was resized, or
+/// [`IDLE_RUN_INTERVAL`] passed; otherwise the previous frame's meshes are drawn again.
+/// when there is nothing to draw at all (menu hidden, no toasts), no GL calls are made.
 pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(), Error> {
     let state = unsafe {
         match &mut STATE {
@@ -164,29 +268,75 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
         }
     };
 
-    if state.window_handle != hdc {
-        state.original_gl_context = wglGetCurrentContext();
-    }
-
     state.window_handle = hdc;
+    let screen_size = get_screen_size()?;
+    let now = Instant::now();
 
-    if wglMakeCurrent(state.window_handle, state.new_gl_context).is_err() {
-        return Err(Error::CtxSwitch);
+    let mut textures_delta = egui::TexturesDelta::default();
+    if !state.events.is_empty() || screen_size != state.last_screen_size || now >= state.next_run {
+        textures_delta = run_ui(state, run_fn, screen_size);
+        state.last_screen_size = screen_size;
     }
 
-    let raw_input = get_raw_input(state)?;
-    // let dpi = match GetDpiForWindow(WindowFromDC(state.window_handle)) {
-    //     0 => 96.0,
-    //     dpi => dpi as f32,
-    // };
-    // let pixels_per_point = dpi / 96.0;
+    if state.last_primitives.is_empty() && textures_delta.is_empty() {
+        return Ok(()); // nothing visible: leave the game's GL state alone
+    }
+
+    let saved = match state.mode {
+        GlMode::Separate => {
+            // always remember the game's context, it may have been recreated
+            // (e.g. after toggling fullscreen)
+            state.original_gl_context = wglGetCurrentContext();
+            if wglMakeCurrent(state.window_handle, state.new_gl_context).is_err() {
+                return Err(Error::CtxSwitch);
+            }
+            None
+        }
+        GlMode::Shared => Some(GlState::save(
+            &state.gl,
+            state.has_vao,
+            state.get_vertex_attrib_iv,
+        )),
+    };
+
+    for (id, image_delta) in &textures_delta.set {
+        state.painter.set_texture(*id, image_delta);
+    }
+    state.painter.paint_primitives(
+        [screen_size.0, screen_size.1],
+        state.last_pixels_per_point,
+        &state.last_primitives,
+    ); // actual opengl calls to render
+    for id in textures_delta.free.drain(..) {
+        state.painter.free_texture(id);
+    }
+
+    match saved {
+        Some(saved) => saved.restore(&state.gl),
+        None => {
+            if wglMakeCurrent(state.window_handle, state.original_gl_context).is_err() {
+                return Err(Error::CtxSwitch);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// runs the UI (CPU only, no GL), stores the tessellated meshes and returns texture changes
+unsafe fn run_ui(
+    state: &mut EguiState,
+    run_fn: Box<dyn Fn(&egui::Context)>,
+    screen_size: (u32, u32),
+) -> egui::TexturesDelta {
+    let raw_input = get_raw_input(state, screen_size);
 
     let egui::FullOutput {
         platform_output,
-        mut textures_delta,
+        textures_delta,
         shapes,
         pixels_per_point,
-        viewport_output: _,
+        viewport_output,
     } = state.egui_ctx.run(raw_input, &*run_fn); // run through ui and get output
 
     if let Some(open_url) = platform_output.open_url {
@@ -203,29 +353,17 @@ pub unsafe fn paint(hdc: HDC, run_fn: Box<dyn Fn(&egui::Context)>) -> Result<(),
             });
     }
 
-    for (id, image_delta) in textures_delta.set {
-        state.painter.set_texture(id, &image_delta);
-    }
-
     // convert to meshes
-    let clipped_primitives = state.egui_ctx.tessellate(shapes, pixels_per_point);
-    let dimensions = get_screen_size()?;
+    state.last_primitives = state.egui_ctx.tessellate(shapes, pixels_per_point);
+    state.last_pixels_per_point = pixels_per_point;
 
-    state.painter.paint_primitives(
-        [dimensions.0, dimensions.1],
-        pixels_per_point,
-        &clipped_primitives,
-    ); // actual opengl calls to render
+    let repaint_delay = viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .map(|v| v.repaint_delay)
+        .unwrap_or(Duration::MAX);
+    state.next_run = Instant::now() + repaint_delay.min(IDLE_RUN_INTERVAL);
 
-    for id in textures_delta.free.drain(..) {
-        state.painter.free_texture(id);
-    }
-
-    if wglMakeCurrent(state.window_handle, state.original_gl_context).is_err() {
-        return Err(Error::CtxSwitch);
-    }
-
-    Ok(())
+    textures_delta
 }
 
 /// returns if you should skip calling original wndproc
@@ -525,11 +663,18 @@ fn get_clipboard_text() -> Option<String> {
     WindowsClipboardContext.get_contents().ok()
 }
 
-unsafe fn get_raw_input(state: &mut EguiState) -> Result<RawInput, Error> {
-    Ok(RawInput {
+unsafe fn get_raw_input(state: &mut EguiState, screen_size: (u32, u32)) -> RawInput {
+    let zoom_factor = state.egui_ctx.zoom_factor();
+    RawInput {
         modifiers: state.modifiers.unwrap_or_default(),
         events: std::mem::take(&mut state.events),
-        screen_rect: Some(get_screen_rect(state.egui_ctx.zoom_factor())?),
+        screen_rect: Some(Rect {
+            min: Pos2::ZERO,
+            max: Pos2 {
+                x: screen_size.0 as f32 / zoom_factor,
+                y: screen_size.1 as f32 / zoom_factor,
+            },
+        }),
         time: Some(get_system_time()),
         max_texture_side: None,
         predicted_dt: 1.0 / 60.0,
@@ -537,7 +682,7 @@ unsafe fn get_raw_input(state: &mut EguiState) -> Result<RawInput, Error> {
         dropped_files: vec![],
         focused: true,
         ..Default::default()
-    })
+    }
 }
 
 fn get_system_time() -> f64 {
@@ -571,14 +716,3 @@ pub fn get_screen_size() -> Result<(u32, u32), Error> {
     ))
 }
 
-fn get_screen_rect(zoom_factor: f32) -> Result<Rect, Error> {
-    let size = get_screen_size()?;
-
-    Ok(Rect {
-        min: Pos2::ZERO,
-        max: Pos2 {
-            x: size.0 as f32 / zoom_factor,
-            y: size.1 as f32 / zoom_factor,
-        },
-    })
-}
